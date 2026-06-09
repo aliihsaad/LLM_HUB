@@ -40,10 +40,22 @@ One-line global install from GitHub:
 npm i -g github:aliihsaad/LLM_HUB && llm-hub install
 ```
 
+PowerShell 5 / Windows PowerShell:
+
+```powershell
+npm i -g github:aliihsaad/LLM_HUB; if ($LASTEXITCODE -eq 0) { llm-hub install }
+```
+
 After the package is published to npm, the registry install is:
 
 ```bash
 npm i -g llm-hub@latest && llm-hub install
+```
+
+PowerShell 5 / Windows PowerShell:
+
+```powershell
+npm i -g llm-hub@latest; if ($LASTEXITCODE -eq 0) { llm-hub install }
 ```
 
 Then launch the local dashboard and proxy:
