@@ -10,7 +10,6 @@ import {
   Home,
   KeyRound,
   LayoutGrid,
-  Terminal,
   Menu,
   MessageSquare,
   MonitorCog,
@@ -32,7 +31,6 @@ import KeysPage from '@/pages/KeysPage'
 import LogsPage from '@/pages/LogsPage'
 import ModelStatusPage from '@/pages/ModelStatusPage'
 import PlaygroundPage from '@/pages/PlaygroundPage'
-import CliPage from '@/pages/CliPage'
 import SettingsPage from '@/pages/SettingsPage'
 import { AuthGate } from '@/components/auth-gate'
 
@@ -105,12 +103,6 @@ const NAV_ITEMS: NavItem[] = [
     icon: MonitorCog,
     label: 'Settings',
     description: 'Security and knowledge settings',
-  },
-  {
-    to: '/cli',
-    icon: Terminal,
-    label: 'CLI',
-    description: 'Installation and terminal commands',
   },
 ]
 
@@ -315,7 +307,6 @@ function AppShell() {
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/cli" element={<CliPage />} />
             <Route path="/test" element={<Navigate to="/playground" replace />} />
             <Route path="/health" element={<Navigate to="/keys" replace />} />
           </Routes>

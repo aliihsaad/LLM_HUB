@@ -1,7 +1,7 @@
 {
   "name": "llm-hub",
-  "version": "0.2.0",
-  "description": "LLM-Hub Pro Max: local OpenAI/Gemini-compatible AI routing hub with dashboard and CLI",
+  "version": "0.3.0",
+  "description": "LLM-Hub Pro Max: local OpenAI/Gemini-compatible AI routing hub with dashboard",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -12,40 +12,31 @@
     "url": "https://github.com/aliihsaad/LLM_HUB/issues"
   },
   "homepage": "https://github.com/aliihsaad/LLM_HUB#readme",
-  "bin": {
-    "llm-hub": "./cli/dist/index.js"
-  },
   "files": [
     ".env.example",
     "README.md",
     "LICENSE",
-    "cli/dist/",
-    "cli/package.json",
     "server/dist/",
     "client/dist/"
   ],
   "workspaces": [
     "shared",
     "server",
-    "client",
-    "cli"
+    "client"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w client\"",
     "test": "npm run test -w server && npm run test -w client",
-    "build": "npm run build -w server && npm run build -w client && npm run build -w cli",
+    "build": "npm run build -w server && npm run build -w client",
     "build:server": "npm run build -w server",
     "prepack": "npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
-    "chalk": "^5.4.1",
-    "commander": "^13.1.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
-    "ora": "^8.2.0",
     "zod": "^3.24.4"
   },
   "devDependencies": {

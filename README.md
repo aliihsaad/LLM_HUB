@@ -15,7 +15,6 @@ https://github.com/tashfeenahmed/freellmapi
 - Health checks, analytics, request logs, provider ranking, and diagnostics
 - Admin dashboard for keys, fallback chain, model availability, and model discovery
 - Optional dashboard PIN lock for management routes and UI
-- CLI for setup and quick runtime checks
 
 ## Project layout
 
@@ -23,7 +22,6 @@ This repo is a workspace with these packages:
 
 - `server/` — Express API (`/v1` proxy + `/api` admin endpoints)
 - `client/` — React/Vite dashboard (SPA)
-- `cli/` — Terminal utility (`llm-hub`)
 - `shared/` — Shared TypeScript contracts
 
 ## Requirements
@@ -34,39 +32,7 @@ This repo is a workspace with these packages:
 
 ## Install and run
 
-One-line global install from GitHub:
-
-```bash
-npm i -g github:aliihsaad/LLM_HUB && llm-hub install
-```
-
-PowerShell 5 / Windows PowerShell:
-
-```powershell
-npm i -g github:aliihsaad/LLM_HUB; if ($LASTEXITCODE -eq 0) { llm-hub install }
-```
-
-After the package is published to npm, the registry install is:
-
-```bash
-npm i -g llm-hub@latest && llm-hub install
-```
-
-PowerShell 5 / Windows PowerShell:
-
-```powershell
-npm i -g llm-hub@latest; if ($LASTEXITCODE -eq 0) { llm-hub install }
-```
-
-Then launch the local dashboard and proxy:
-
-```bash
-llm-hub start
-```
-
-Dashboard and API run together at `http://localhost:3001`.
-
-Source checkout install:
+Clone the source and install dependencies:
 
 ```bash
 git clone <repo-url>
@@ -230,112 +196,6 @@ Provider catalog is defined in `server/src/providers/index.ts`:
 
 Capability availability varies by provider and key status. The dashboard shows
 live per-provider/per-capability health and configuration.
-
-## CLI
-
-The CLI can be used as a terminal AI assistant and as a local router manager:
-
-```bash
-npm run build -w cli
-node cli/dist/index.js install
-```
-
-The `install` command:
-
-- creates `.env` (if missing),
-- writes a random encryption key,
-- runs `npm install`.
-
-Run the full stack from terminal:
-
-```bash
-node cli/dist/index.js start
-```
-
-Check runtime status:
-
-```bash
-node cli/dist/index.js status
-```
-
-Use the terminal AI assistant:
-
-```bash
-llm-hub ask "explain this error"
-llm-hub chat
-llm-hub chat -m google/gemini-2.5-flash
-```
-
-Use the terminal coding agent with local tools:
-
-```bash
-llm-hub agent
-llm-hub agent "fix the failing build" -f .
-llm-hub code "review this file and apply a focused fix" -f server/src/routes/proxy.ts
-llm-hub code "explain the router flow" -f server/src/services/router.ts -f server/src/routes/proxy.ts
-```
-
-Agent mode can list/read/search files, apply exact file edits, write files, and run commands. It asks for approval before edits and commands unless you pass `--yes`:
-
-```bash
-llm-hub agent "run the tests and fix what breaks" -f . --yes
-```
-
-Inside interactive chat/agent mode:
-
-- `/models` lists routable models
-- `/clear` resets the current conversation
-- `/exit` quits
-
-List models from the admin catalog or the OpenAI-compatible `/v1/models` route:
-
-```bash
-node cli/dist/index.js models --provider huggingface --limit 20
-node cli/dist/index.js models --routable
-```
-
-Manage provider API keys:
-
-```bash
-node cli/dist/index.js keys list
-node cli/dist/index.js keys add huggingface hf_xxx --label "HF account"
-node cli/dist/index.js keys disable 12
-node cli/dist/index.js keys enable 12
-node cli/dist/index.js keys delete 12
-```
-
-`apis` is an alias for the same provider-key commands:
-
-```bash
-node cli/dist/index.js apis add groq gsk_xxx --label "Groq account"
-```
-
-List provider integration metadata:
-
-```bash
-node cli/dist/index.js providers
-```
-
-Manage documentation/MCP-style Context7 integration checks:
-
-```bash
-node cli/dist/index.js mcp status
-node cli/dist/index.js mcp context7:set ctx7_xxx
-node cli/dist/index.js mcp sync-docs
-node cli/dist/index.js mcp context7:clear
-```
-
-Open `.env` in your default editor:
-
-```bash
-node cli/dist/index.js config
-```
-
-If you prefer direct `ts` execution after install:
-
-```bash
-npx tsx cli/src/index.ts start
-```
 
 ## Development
 
