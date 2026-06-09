@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { execSync } from 'child_process';
@@ -9,7 +10,10 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..', '..');
 const packagePath = path.join(rootDir, 'cli', 'package.json');
-const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
+const rootPackagePath = path.join(rootDir, 'package.json');
+const pkg = JSON.parse(fs.readFileSync(fs.existsSync(packagePath) ? packagePath : rootPackagePath, 'utf-8'));
+const builtServerEntry = path.join(rootDir, 'server', 'dist', 'index.js');
+const builtClientEntry = path.join(rootDir, 'client', 'dist', 'index.html');
 
 const DEFAULT_SERVER_URL = 'http://localhost:3001';
 
@@ -82,13 +86,18 @@ PORT=3001
       console.log(chalk.green('Created .env with a random encryption key.'));
     }
 
-    console.log(chalk.blue('\nInstalling dependencies...'));
-    try {
-      execSync('npm install', { cwd: rootDir, stdio: 'inherit' });
-      console.log(chalk.green('Dependencies installed.'));
-    } catch (e) {
-      console.error(chalk.red('Failed to install dependencies.'), e);
-      process.exit(1);
+    if (fs.existsSync(builtServerEntry) && fs.existsSync(builtClientEntry)) {
+      console.log(chalk.green('Production server and dashboard build found.'));
+    } else {
+      console.log(chalk.blue('\nInstalling dependencies and building the app...'));
+      try {
+        execSync('npm install', { cwd: rootDir, stdio: 'inherit' });
+        execSync('npm run build', { cwd: rootDir, stdio: 'inherit' });
+        console.log(chalk.green('Dependencies installed and app built.'));
+      } catch (e) {
+        console.error(chalk.red('Failed to install dependencies or build the app.'), e);
+        process.exit(1);
+      }
     }
 
     console.log(chalk.green('\nLLM-Hub Pro Max is ready. Run `llm-hub start` to launch.'));
@@ -100,7 +109,11 @@ program
   .action(() => {
     console.log(chalk.blue('Starting LLM-Hub Pro Max...'));
     try {
-      execSync('npm run dev', { cwd: rootDir, stdio: 'inherit' });
+      if (fs.existsSync(builtServerEntry) && fs.existsSync(builtClientEntry)) {
+        execSync(`node "${builtServerEntry}"`, { cwd: rootDir, stdio: 'inherit' });
+      } else {
+        execSync('npm run dev', { cwd: rootDir, stdio: 'inherit' });
+      }
     } catch (e) {
       console.error(chalk.red('Failed to start.'), e);
       process.exit(1);

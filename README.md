@@ -34,6 +34,28 @@ This repo is a workspace with these packages:
 
 ## Install and run
 
+One-line global install from GitHub:
+
+```bash
+npm i -g github:aliihsaad/LLM_HUB && llm-hub install
+```
+
+After the package is published to npm, the registry install is:
+
+```bash
+npm i -g llm-hub@latest && llm-hub install
+```
+
+Then launch the local dashboard and proxy:
+
+```bash
+llm-hub start
+```
+
+Dashboard and API run together at `http://localhost:3001`.
+
+Source checkout install:
+
 ```bash
 git clone <repo-url>
 cd <repo-folder>
