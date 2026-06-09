@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="136" viewBox="0 0 560 136" role="img" aria-labelledby="title desc">
+  <title id="title">LLM-Hub Pro Max</title>
+  <desc id="desc">LLM-Hub Pro Max wordmark with routing icon.</desc>
+  <defs>
+    <linearGradient id="wordmark-bg" x1="8" x2="118" y1="8" y2="126" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#101827"/>
+      <stop offset=".52" stop-color="#071814"/>
+      <stop offset="1" stop-color="#1d1428"/>
+    </linearGradient>
+    <linearGradient id="wordmark-route" x1="34" x2="96" y1="44" y2="82" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset=".5" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+    <linearGradient id="badge-bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset=".58" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#9f1239"/>
+    </linearGradient>
+  </defs>
+  <rect width="560" height="136" rx="18" fill="#020617"/>
+  <rect x="12" y="12" width="112" height="112" rx="24" fill="url(#wordmark-bg)"/>
+  <path d="M38 82 58 52 75 73 94 51" fill="none" stroke="url(#wordmark-route)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M40 46h29M40 66h22M40 86h17" fill="none" stroke="#f8fafc" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="38" cy="82" r="8" fill="#2dd4bf" stroke="#f8fafc" stroke-width="4"/>
+  <circle cx="58" cy="52" r="8" fill="#f59e0b" stroke="#f8fafc" stroke-width="4"/>
+  <circle cx="94" cy="51" r="8" fill="#f43f5e" stroke="#f8fafc" stroke-width="4"/>
+  <text x="148" y="64" fill="#f8fafc" font-family="Geist, Inter, ui-sans-serif, system-ui, sans-serif" font-size="38" font-weight="760" letter-spacing="0">LLM-Hub</text>
+  <rect x="148" y="78" width="114" height="30" rx="7" fill="url(#badge-bg)" stroke="#99f6e4" stroke-opacity=".36"/>
+  <text x="162" y="99" fill="#f8fafc" font-family="Geist, Inter, ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="800" letter-spacing="1.4">PRO MAX</text>
+  <text x="284" y="99" fill="#94a3b8" font-family="Geist, Inter, ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="540" letter-spacing="0">multimodal local AI router</text>
+</svg>
