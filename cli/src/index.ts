@@ -6,6 +6,8 @@ import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import readline from 'readline/promises';
+import { stdin as input, stdout as output } from 'process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..', '..');
@@ -19,6 +21,20 @@ const DEFAULT_SERVER_URL = 'http://localhost:3001';
 
 interface CliOptions {
   server?: string;
+}
+
+type ChatRole = 'system' | 'user' | 'assistant';
+
+interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+interface ChatRequestOptions {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  stream?: boolean;
 }
 
 function serverUrl(options?: CliOptions): string {
@@ -56,6 +72,224 @@ function printRows(rows: Record<string, unknown>[], json?: boolean) {
     return;
   }
   console.table(rows);
+}
+
+function cleanModel(model?: string): string | undefined {
+  if (!model || model === 'auto') return undefined;
+  return model;
+}
+
+function compactText(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+async function postChatCompletion(
+  messages: ChatMessage[],
+  requestOptions: ChatRequestOptions,
+  cliOptions: CliOptions,
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    messages,
+    temperature: requestOptions.temperature,
+    max_tokens: requestOptions.maxTokens,
+    stream: requestOptions.stream ?? true,
+  };
+  const model = cleanModel(requestOptions.model);
+  if (model) body.model = model;
+
+  const res = await fetch(`${serverUrl(cliOptions)}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text);
+      message = parsed?.error?.message ?? parsed?.message ?? text;
+    } catch {}
+    throw new Error(message || `HTTP ${res.status}`);
+  }
+
+  if (!requestOptions.stream) {
+    const payload = await res.json() as any;
+    return compactText(payload?.choices?.[0]?.message?.content);
+  }
+
+  if (!res.body) throw new Error('No response body from server.');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(data);
+        const delta = compactText(parsed?.choices?.[0]?.delta?.content);
+        const message = compactText(parsed?.choices?.[0]?.message?.content);
+        const text = delta || message;
+        if (text) {
+          fullText += text;
+          process.stdout.write(text);
+        }
+      } catch {
+        // Ignore malformed provider frames; the proxy may still continue.
+      }
+    }
+  }
+
+  process.stdout.write('\n');
+  return fullText;
+}
+
+function joinPrompt(parts?: string[]): string {
+  return (parts ?? []).join(' ').trim();
+}
+
+function resolveCliPath(value: string, cwd: string): string {
+  return path.isAbsolute(value) ? value : path.resolve(cwd, value);
+}
+
+function shouldSkipPath(filePath: string): boolean {
+  const parts = filePath.split(/[\\/]/);
+  return parts.some(part => ['.git', 'node_modules', 'dist', 'data', '.next', 'coverage'].includes(part));
+}
+
+function collectContextFiles(inputPath: string): string[] {
+  if (!fs.existsSync(inputPath) || shouldSkipPath(inputPath)) return [];
+  const stat = fs.statSync(inputPath);
+  if (stat.isFile()) return [inputPath];
+  if (!stat.isDirectory()) return [];
+
+  const allowed = new Set([
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+    '.json', '.md', '.css', '.html', '.py', '.rs',
+    '.go', '.java', '.cs', '.php', '.rb', '.yml',
+    '.yaml', '.toml', '.sql', '.sh', '.ps1',
+  ]);
+
+  const out: string[] = [];
+  const stack = [inputPath];
+  while (stack.length && out.length < 80) {
+    const current = stack.pop()!;
+    if (shouldSkipPath(current)) continue;
+
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const next = path.join(current, entry.name);
+      if (shouldSkipPath(next)) continue;
+      if (entry.isDirectory()) {
+        stack.push(next);
+      } else if (entry.isFile() && allowed.has(path.extname(entry.name).toLowerCase())) {
+        out.push(next);
+      }
+    }
+  }
+  return out;
+}
+
+function readContext(files: string[] | undefined, cwd: string): string {
+  const requested = files ?? [];
+  if (requested.length === 0) return '';
+
+  const paths = Array.from(new Set(requested.flatMap(item => collectContextFiles(resolveCliPath(item, cwd)))));
+  const chunks: string[] = [];
+  let used = 0;
+  const maxChars = 60000;
+
+  for (const filePath of paths) {
+    if (used >= maxChars) break;
+    try {
+      const text = fs.readFileSync(filePath, 'utf8');
+      const relative = path.relative(cwd, filePath) || filePath;
+      const remaining = maxChars - used;
+      const body = text.length > remaining ? text.slice(0, remaining) : text;
+      chunks.push(`--- ${relative} ---\n${body}`);
+      used += body.length;
+    } catch {}
+  }
+
+  return chunks.length ? `\n\nProject context:\n${chunks.join('\n\n')}` : '';
+}
+
+async function runOneShotChat(prompt: string, systemPrompt: string, cmd: any) {
+  const options = program.opts<CliOptions>();
+  const messages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+  ];
+
+  try {
+    await postChatCompletion(messages, {
+      model: cmd.model,
+      temperature: Number(cmd.temperature),
+      maxTokens: Number(cmd.maxTokens),
+      stream: cmd.stream,
+    }, options);
+  } catch (error: any) {
+    console.error(chalk.red(`LLM-Hub request failed: ${error.message}`));
+    console.error(chalk.gray(`Make sure the server is running: llm-hub start`));
+    process.exit(1);
+  }
+}
+
+async function runInteractiveChat(systemPrompt: string, cmd: any) {
+  const options = program.opts<CliOptions>();
+  const rl = readline.createInterface({ input, output });
+  const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }];
+
+  console.log(chalk.bold.blue('LLM-Hub terminal chat'));
+  console.log(chalk.gray('Type /exit to quit, /clear to reset, /models to list routable models.\n'));
+
+  try {
+    while (true) {
+      const prompt = (await rl.question(chalk.cyan('you> '))).trim();
+      if (!prompt) continue;
+      if (prompt === '/exit' || prompt === '/quit') break;
+      if (prompt === '/clear') {
+        messages.splice(1);
+        console.log(chalk.gray('Conversation cleared.'));
+        continue;
+      }
+      if (prompt === '/models') {
+        const data = await apiRequest<{ data: Array<{ id: string; owned_by?: string }> }>('/v1/models', options);
+        console.table(data.data.slice(0, 30).map(item => ({ model: item.id, provider: item.owned_by ?? '' })));
+        continue;
+      }
+
+      messages.push({ role: 'user', content: prompt });
+      process.stdout.write(chalk.green('assistant> '));
+      const reply = await postChatCompletion(messages, {
+        model: cmd.model,
+        temperature: Number(cmd.temperature),
+        maxTokens: Number(cmd.maxTokens),
+        stream: cmd.stream,
+      }, options);
+      messages.push({ role: 'assistant', content: reply });
+    }
+  } catch (error: any) {
+    console.error(chalk.red(`\nLLM-Hub chat failed: ${error.message}`));
+    console.error(chalk.gray(`Make sure the server is running: llm-hub start`));
+    process.exitCode = 1;
+  } finally {
+    rl.close();
+  }
 }
 
 const program = new Command();
@@ -208,6 +442,82 @@ program
     } catch (error: any) {
       console.error(chalk.red(`Failed to list providers: ${error.message}`));
       process.exit(1);
+    }
+  });
+
+program
+  .command('ask [prompt...]')
+  .description('Ask the routed models one question from the terminal')
+  .option('-m, --model <model>', 'model id to use; omit or use auto for router selection', 'auto')
+  .option('-t, --temperature <number>', 'sampling temperature', '0.4')
+  .option('--max-tokens <number>', 'maximum output tokens', '1200')
+  .option('--no-stream', 'disable streaming output')
+  .action(async (promptParts, cmd) => {
+    let prompt = joinPrompt(promptParts);
+    if (!prompt && !process.stdin.isTTY) {
+      prompt = await new Promise<string>((resolve) => {
+        let data = '';
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', chunk => { data += chunk; });
+        process.stdin.on('end', () => resolve(data.trim()));
+      });
+    }
+
+    if (!prompt) {
+      console.error(chalk.red('No prompt provided.'));
+      console.error(chalk.gray('Example: llm-hub ask "explain this error"'));
+      process.exit(1);
+    }
+
+    await runOneShotChat(prompt, 'You are a concise, practical AI assistant.', cmd);
+  });
+
+program
+  .command('chat [prompt...]')
+  .description('Start an interactive terminal chat using the local routing layer')
+  .option('-m, --model <model>', 'model id to use; omit or use auto for router selection', 'auto')
+  .option('-t, --temperature <number>', 'sampling temperature', '0.4')
+  .option('--max-tokens <number>', 'maximum output tokens per reply', '1600')
+  .option('--system <prompt>', 'override the system prompt')
+  .option('--no-stream', 'disable streaming output')
+  .action(async (promptParts, cmd) => {
+    const systemPrompt = cmd.system || 'You are a helpful terminal AI assistant. Be direct, practical, and concise.';
+    const prompt = joinPrompt(promptParts);
+    if (prompt) {
+      await runOneShotChat(prompt, systemPrompt, cmd);
+    } else {
+      await runInteractiveChat(systemPrompt, cmd);
+    }
+  });
+
+program
+  .command('code [prompt...]')
+  .alias('agent')
+  .description('Coding-focused terminal assistant with optional file or folder context')
+  .option('-m, --model <model>', 'model id to use; omit or use auto for router selection', 'auto')
+  .option('-t, --temperature <number>', 'sampling temperature', '0.2')
+  .option('--max-tokens <number>', 'maximum output tokens per reply', '2400')
+  .option('-f, --file <path...>', 'include files or folders as context')
+  .option('--cwd <path>', 'workspace directory for relative file paths', process.cwd())
+  .option('--no-stream', 'disable streaming output')
+  .action(async (promptParts, cmd) => {
+    const cwd = resolveCliPath(cmd.cwd, process.cwd());
+    const context = readContext(cmd.file, cwd);
+    const systemPrompt = [
+      'You are LLM-Hub Code, a terminal coding assistant.',
+      'Answer like a senior pragmatic software engineer.',
+      'When code changes are needed, be specific about files and exact edits.',
+      'Do not invent file contents that were not provided; ask for file context when needed.',
+    ].join(' ');
+
+    const prompt = joinPrompt(promptParts);
+    if (prompt) {
+      await runOneShotChat(`${prompt}${context}`, systemPrompt, cmd);
+    } else {
+      const withContext = context
+        ? `${systemPrompt}\n\nUse this initial project context for the session.${context}`
+        : systemPrompt;
+      await runInteractiveChat(withContext, cmd);
     }
   });
 

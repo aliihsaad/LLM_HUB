@@ -1,6 +1,6 @@
 {
   "name": "llmhub-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI for LLM-Hub Pro Max — run, check status, and manage your free-LLM router from the terminal",
   "type": "module",
   "bin": {

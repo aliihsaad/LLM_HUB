@@ -233,7 +233,7 @@ live per-provider/per-capability health and configuration.
 
 ## CLI
 
-The CLI is a small local helper:
+The CLI can be used as a terminal AI assistant and as a local router manager:
 
 ```bash
 npm run build -w cli
@@ -257,6 +257,29 @@ Check runtime status:
 ```bash
 node cli/dist/index.js status
 ```
+
+Use the terminal AI assistant:
+
+```bash
+llm-hub ask "explain this error"
+llm-hub chat
+llm-hub chat -m google/gemini-2.5-flash
+```
+
+Use coding mode with project context:
+
+```bash
+llm-hub agent "help me debug this repo" -f .
+llm-hub code "review this file and suggest fixes" -f server/src/routes/proxy.ts
+llm-hub code "explain the router flow" -f server/src/services/router.ts -f server/src/routes/proxy.ts
+llm-hub code -f .
+```
+
+Inside interactive chat/code mode:
+
+- `/models` lists routable models
+- `/clear` resets the current conversation
+- `/exit` quits
 
 List models from the admin catalog or the OpenAI-compatible `/v1/models` route:
 
