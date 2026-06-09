@@ -266,16 +266,22 @@ llm-hub chat
 llm-hub chat -m google/gemini-2.5-flash
 ```
 
-Use coding mode with project context:
+Use the terminal coding agent with local tools:
 
 ```bash
-llm-hub agent "help me debug this repo" -f .
-llm-hub code "review this file and suggest fixes" -f server/src/routes/proxy.ts
+llm-hub agent
+llm-hub agent "fix the failing build" -f .
+llm-hub code "review this file and apply a focused fix" -f server/src/routes/proxy.ts
 llm-hub code "explain the router flow" -f server/src/services/router.ts -f server/src/routes/proxy.ts
-llm-hub code -f .
 ```
 
-Inside interactive chat/code mode:
+Agent mode can list/read/search files, apply exact file edits, write files, and run commands. It asks for approval before edits and commands unless you pass `--yes`:
+
+```bash
+llm-hub agent "run the tests and fix what breaks" -f . --yes
+```
+
+Inside interactive chat/agent mode:
 
 - `/models` lists routable models
 - `/clear` resets the current conversation

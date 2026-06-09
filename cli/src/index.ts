@@ -37,6 +37,31 @@ interface ChatRequestOptions {
   stream?: boolean;
 }
 
+type AgentToolName =
+  | 'list_files'
+  | 'read_file'
+  | 'search'
+  | 'replace_in_file'
+  | 'write_file'
+  | 'run_command'
+  | 'finish';
+
+interface AgentToolCall {
+  tool: AgentToolName;
+  reason?: string;
+  args?: Record<string, unknown>;
+}
+
+interface AgentOptions {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  cwd: string;
+  yes?: boolean;
+  maxSteps: number;
+  stream?: boolean;
+}
+
 function serverUrl(options?: CliOptions): string {
   return (options?.server ?? process.env.LLMHUB_SERVER_URL ?? DEFAULT_SERVER_URL).replace(/\/$/, '');
 }
@@ -228,6 +253,230 @@ function readContext(files: string[] | undefined, cwd: string): string {
   return chunks.length ? `\n\nProject context:\n${chunks.join('\n\n')}` : '';
 }
 
+function truncate(value: string, max = 12000): string {
+  return value.length > max ? `${value.slice(0, max)}\n...[truncated ${value.length - max} chars]` : value;
+}
+
+function resolveAgentPath(value: unknown, cwd: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('path is required');
+  const resolved = resolveCliPath(value.trim(), cwd);
+  const relative = path.relative(cwd, resolved);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Refusing to access path outside workspace: ${value}`);
+  }
+  return resolved;
+}
+
+function allowedTextFile(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  return [
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.css',
+    '.html', '.py', '.rs', '.go', '.java', '.cs', '.php', '.rb', '.yml',
+    '.yaml', '.toml', '.sql', '.sh', '.ps1', '.txt', '.env', '.example',
+  ].includes(ext) || ['Dockerfile', 'Makefile', '.gitignore'].includes(path.basename(filePath));
+}
+
+function listAgentFiles(target: string, cwd: string, max = 200): string {
+  const root = resolveAgentPath(target || '.', cwd);
+  if (!fs.existsSync(root)) return `Path not found: ${path.relative(cwd, root)}`;
+  if (fs.statSync(root).isFile()) return path.relative(cwd, root);
+
+  const rows: string[] = [];
+  const stack = [root];
+  while (stack.length && rows.length < max) {
+    const current = stack.pop()!;
+    if (shouldSkipPath(current)) continue;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const next = path.join(current, entry.name);
+      if (shouldSkipPath(next)) continue;
+      const relative = path.relative(cwd, next);
+      if (entry.isDirectory()) {
+        rows.push(`${relative}/`);
+        stack.push(next);
+      } else {
+        rows.push(relative);
+      }
+      if (rows.length >= max) break;
+    }
+  }
+  return rows.join('\n') || '(empty)';
+}
+
+function readAgentFile(filePath: string, cwd: string, startLine = 1, maxLines = 240): string {
+  const resolved = resolveAgentPath(filePath, cwd);
+  if (!fs.existsSync(resolved)) return `File not found: ${filePath}`;
+  if (!fs.statSync(resolved).isFile()) return `Not a file: ${filePath}`;
+  if (!allowedTextFile(resolved)) return `Refusing to read non-text file: ${filePath}`;
+
+  const lines = fs.readFileSync(resolved, 'utf8').split(/\r?\n/);
+  const start = Math.max(1, startLine);
+  const end = Math.min(lines.length, start + Math.max(1, maxLines) - 1);
+  return lines
+    .slice(start - 1, end)
+    .map((line, index) => `${String(start + index).padStart(4, ' ')} | ${line}`)
+    .join('\n');
+}
+
+function searchAgentFiles(query: string, target: string, cwd: string, max = 80): string {
+  if (!query) throw new Error('query is required');
+  const root = resolveAgentPath(target || '.', cwd);
+  if (!fs.existsSync(root)) return `Path not found: ${target}`;
+
+  const files = collectContextFiles(root);
+  const rows: string[] = [];
+  const needle = query.toLowerCase();
+  for (const file of files) {
+    if (rows.length >= max) break;
+    try {
+      const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toLowerCase().includes(needle)) {
+          rows.push(`${path.relative(cwd, file)}:${i + 1}: ${lines[i].trim()}`);
+          if (rows.length >= max) break;
+        }
+      }
+    } catch {}
+  }
+  return rows.join('\n') || '(no matches)';
+}
+
+function summarizeDiff(before: string, after: string, fileLabel: string): string {
+  if (before === after) return `No changes in ${fileLabel}.`;
+  const a = before.split(/\r?\n/);
+  const b = after.split(/\r?\n/);
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+  let suffix = 0;
+  while (
+    suffix + prefix < a.length
+    && suffix + prefix < b.length
+    && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+  ) suffix++;
+
+  const beforeChunk = a.slice(prefix, Math.max(prefix, a.length - suffix)).slice(0, 40);
+  const afterChunk = b.slice(prefix, Math.max(prefix, b.length - suffix)).slice(0, 40);
+  return [
+    `Diff preview for ${fileLabel} around line ${prefix + 1}:`,
+    ...beforeChunk.map(line => `- ${line}`),
+    ...afterChunk.map(line => `+ ${line}`),
+  ].join('\n');
+}
+
+async function confirmAction(rl: readline.Interface, label: string, details: string, assumedYes?: boolean): Promise<boolean> {
+  if (assumedYes) return true;
+  console.log(chalk.yellow(`\nApproval required: ${label}`));
+  console.log(truncate(details, 6000));
+  const answer = (await rl.question(chalk.cyan('Run this action? [y/N] '))).trim().toLowerCase();
+  return answer === 'y' || answer === 'yes';
+}
+
+function parseToolCall(raw: string): AgentToolCall | null {
+  const trimmed = raw.trim();
+  const unwrapped = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  const candidates = [unwrapped];
+  const firstBrace = unwrapped.indexOf('{');
+  const lastBrace = unwrapped.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(unwrapped.slice(firstBrace, lastBrace + 1));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && typeof parsed.tool === 'string') {
+        return { tool: parsed.tool, reason: parsed.reason, args: parsed.args ?? {} } as AgentToolCall;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function formatToolResult(tool: AgentToolName, ok: boolean, outputText: string): string {
+  return JSON.stringify({
+    tool_result: {
+      tool,
+      ok,
+      output: truncate(outputText, 16000),
+    },
+  });
+}
+
+async function runAgentTool(call: AgentToolCall, options: AgentOptions, rl: readline.Interface): Promise<string> {
+  const args = call.args ?? {};
+  const cwd = options.cwd;
+  try {
+    switch (call.tool) {
+      case 'list_files': {
+        const target = typeof args.path === 'string' ? args.path : '.';
+        return formatToolResult(call.tool, true, listAgentFiles(target, cwd, Number(args.max ?? 200)));
+      }
+      case 'read_file': {
+        return formatToolResult(call.tool, true, readAgentFile(
+          String(args.path ?? ''),
+          cwd,
+          Number(args.startLine ?? args.start_line ?? 1),
+          Number(args.maxLines ?? args.max_lines ?? 240),
+        ));
+      }
+      case 'search': {
+        return formatToolResult(call.tool, true, searchAgentFiles(
+          String(args.query ?? ''),
+          typeof args.path === 'string' ? args.path : '.',
+          cwd,
+          Number(args.max ?? 80),
+        ));
+      }
+      case 'replace_in_file': {
+        const resolved = resolveAgentPath(args.path, cwd);
+        const search = String(args.search ?? '');
+        const replacement = String(args.replace ?? '');
+        if (!search) throw new Error('search is required');
+        if (!fs.existsSync(resolved)) throw new Error(`File not found: ${args.path}`);
+        const before = fs.readFileSync(resolved, 'utf8');
+        if (!before.includes(search)) throw new Error('Exact search text not found');
+        const after = args.all === true ? before.split(search).join(replacement) : before.replace(search, replacement);
+        const diff = summarizeDiff(before, after, path.relative(cwd, resolved));
+        const ok = await confirmAction(rl, `edit ${path.relative(cwd, resolved)}`, diff, options.yes);
+        if (!ok) return formatToolResult(call.tool, false, 'User rejected edit.');
+        fs.writeFileSync(resolved, after, 'utf8');
+        return formatToolResult(call.tool, true, diff);
+      }
+      case 'write_file': {
+        const resolved = resolveAgentPath(args.path, cwd);
+        const content = String(args.content ?? '');
+        const before = fs.existsSync(resolved) ? fs.readFileSync(resolved, 'utf8') : '';
+        const diff = summarizeDiff(before, content, path.relative(cwd, resolved));
+        const ok = await confirmAction(rl, `write ${path.relative(cwd, resolved)}`, diff, options.yes);
+        if (!ok) return formatToolResult(call.tool, false, 'User rejected write.');
+        fs.mkdirSync(path.dirname(resolved), { recursive: true });
+        fs.writeFileSync(resolved, content, 'utf8');
+        return formatToolResult(call.tool, true, diff);
+      }
+      case 'run_command': {
+        const command = String(args.command ?? '');
+        if (!command) throw new Error('command is required');
+        const ok = await confirmAction(rl, `run command`, `${cwd}> ${command}`, options.yes);
+        if (!ok) return formatToolResult(call.tool, false, 'User rejected command.');
+        const outputText = execSync(command, {
+          cwd,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: Number(args.timeoutMs ?? args.timeout_ms ?? 120000),
+        });
+        return formatToolResult(call.tool, true, outputText || '(command completed with no output)');
+      }
+      case 'finish':
+        return formatToolResult(call.tool, true, String(args.message ?? call.reason ?? 'Done.'));
+      default:
+        return formatToolResult(call.tool, false, `Unknown tool: ${call.tool}`);
+    }
+  } catch (error: any) {
+    return formatToolResult(call.tool, false, error.message ?? String(error));
+  }
+}
+
 async function runOneShotChat(prompt: string, systemPrompt: string, cmd: any) {
   const options = program.opts<CliOptions>();
   const messages: ChatMessage[] = [
@@ -287,6 +536,116 @@ async function runInteractiveChat(systemPrompt: string, cmd: any) {
     console.error(chalk.red(`\nLLM-Hub chat failed: ${error.message}`));
     console.error(chalk.gray(`Make sure the server is running: llm-hub start`));
     process.exitCode = 1;
+  } finally {
+    rl.close();
+  }
+}
+
+const AGENT_SYSTEM_PROMPT = `You are LLM-Hub Agent, a terminal coding agent.
+You can inspect and modify the user's current workspace through tools.
+
+Tool protocol:
+Return exactly one JSON object when you need a tool, with this shape:
+{"tool":"read_file","reason":"why","args":{"path":"relative/path.ts","startLine":1,"maxLines":200}}
+
+Available tools:
+- list_files: {"path":".","max":200}
+- read_file: {"path":"file.ts","startLine":1,"maxLines":240}
+- search: {"query":"text","path":".","max":80}
+- replace_in_file: {"path":"file.ts","search":"exact old text","replace":"exact new text","all":false}
+- write_file: {"path":"file.ts","content":"full file content"}
+- run_command: {"command":"npm run build","timeoutMs":120000}
+- finish: {"message":"final answer"}
+
+Rules:
+- Prefer reading/searching before editing.
+- Use exact replace_in_file for small edits.
+- Use write_file only for new files or full-file rewrites.
+- Use run_command for tests/builds when useful.
+- Explain concise progress in reason fields.
+- Do not claim a command passed unless you ran it.
+- When the work is done, call finish with a concise summary and verification.
+- If you cannot proceed, call finish and explain the blocker.`;
+
+async function runAgentTurn(task: string, options: AgentOptions, initialContext = ''): Promise<void> {
+  const cliOptions = program.opts<CliOptions>();
+  const rl = readline.createInterface({ input, output });
+  const messages: ChatMessage[] = [
+    { role: 'system', content: AGENT_SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: [
+        `Workspace: ${options.cwd}`,
+        `Task: ${task}`,
+        initialContext ? `Initial context:${initialContext}` : '',
+      ].filter(Boolean).join('\n\n'),
+    },
+  ];
+
+  try {
+    for (let step = 1; step <= options.maxSteps; step++) {
+      const reply = await postChatCompletion(messages, {
+        model: options.model,
+        temperature: options.temperature,
+        maxTokens: options.maxTokens,
+        stream: false,
+      }, cliOptions);
+
+      const call = parseToolCall(reply);
+      if (!call) {
+        console.log(chalk.green('agent> ') + reply);
+        return;
+      }
+
+      if (call.tool === 'finish') {
+        console.log(chalk.green('agent> ') + String(call.args?.message ?? call.reason ?? 'Done.'));
+        return;
+      }
+
+      console.log(chalk.gray(`\n[${step}/${options.maxSteps}] ${call.tool}${call.reason ? ` - ${call.reason}` : ''}`));
+      const result = await runAgentTool(call, options, rl);
+      const parsedResult = JSON.parse(result);
+      const resultText = parsedResult?.tool_result?.output ?? result;
+      const ok = parsedResult?.tool_result?.ok;
+      console.log(ok ? chalk.gray(truncate(resultText, 3000)) : chalk.red(truncate(resultText, 3000)));
+
+      messages.push({ role: 'assistant', content: reply });
+      messages.push({ role: 'user', content: result });
+    }
+
+    console.log(chalk.yellow(`Agent stopped after ${options.maxSteps} steps. Run again to continue.`));
+  } catch (error: any) {
+    console.error(chalk.red(`Agent failed: ${error.message}`));
+    console.error(chalk.gray(`Make sure the server is running: llm-hub start`));
+    process.exitCode = 1;
+  } finally {
+    rl.close();
+  }
+}
+
+async function runInteractiveAgent(options: AgentOptions, initialContext = ''): Promise<void> {
+  const rl = readline.createInterface({ input, output });
+  console.log(chalk.bold.blue('LLM-Hub Agent'));
+  console.log(chalk.gray('Type a coding task. /exit quits, /models lists routable models.\n'));
+
+  try {
+    while (true) {
+      const task = (await rl.question(chalk.cyan('task> '))).trim();
+      if (!task) continue;
+      if (task === '/exit' || task === '/quit') break;
+      if (task === '/clear') {
+        console.log(chalk.gray('Agent session context cleared for future tasks.'));
+        initialContext = '';
+        continue;
+      }
+      if (task === '/models') {
+        const cliOptions = program.opts<CliOptions>();
+        const data = await apiRequest<{ data: Array<{ id: string; owned_by?: string }> }>('/v1/models', cliOptions);
+        console.table(data.data.slice(0, 30).map(item => ({ model: item.id, provider: item.owned_by ?? '' })));
+        continue;
+      }
+      await runAgentTurn(task, options, initialContext);
+    }
   } finally {
     rl.close();
   }
@@ -493,31 +852,32 @@ program
 program
   .command('code [prompt...]')
   .alias('agent')
-  .description('Coding-focused terminal assistant with optional file or folder context')
+  .description('OpenCode-style terminal coding agent with local file and command tools')
   .option('-m, --model <model>', 'model id to use; omit or use auto for router selection', 'auto')
   .option('-t, --temperature <number>', 'sampling temperature', '0.2')
   .option('--max-tokens <number>', 'maximum output tokens per reply', '2400')
   .option('-f, --file <path...>', 'include files or folders as context')
   .option('--cwd <path>', 'workspace directory for relative file paths', process.cwd())
-  .option('--no-stream', 'disable streaming output')
+  .option('--max-steps <number>', 'maximum tool steps per task', '20')
+  .option('-y, --yes', 'approve file edits and commands without prompting')
   .action(async (promptParts, cmd) => {
     const cwd = resolveCliPath(cmd.cwd, process.cwd());
     const context = readContext(cmd.file, cwd);
-    const systemPrompt = [
-      'You are LLM-Hub Code, a terminal coding assistant.',
-      'Answer like a senior pragmatic software engineer.',
-      'When code changes are needed, be specific about files and exact edits.',
-      'Do not invent file contents that were not provided; ask for file context when needed.',
-    ].join(' ');
+    const agentOptions: AgentOptions = {
+      model: cmd.model,
+      temperature: Number(cmd.temperature),
+      maxTokens: Number(cmd.maxTokens),
+      cwd,
+      yes: cmd.yes,
+      maxSteps: Number(cmd.maxSteps),
+      stream: false,
+    };
 
     const prompt = joinPrompt(promptParts);
     if (prompt) {
-      await runOneShotChat(`${prompt}${context}`, systemPrompt, cmd);
+      await runAgentTurn(prompt, agentOptions, context);
     } else {
-      const withContext = context
-        ? `${systemPrompt}\n\nUse this initial project context for the session.${context}`
-        : systemPrompt;
-      await runInteractiveChat(withContext, cmd);
+      await runInteractiveAgent(agentOptions, context);
     }
   });
 
