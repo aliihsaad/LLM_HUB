@@ -989,17 +989,29 @@ function seedModelCapabilities(db) {
         ['openrouter', 'black-forest-labs/flux.2-klein-4b', 'FLUX.2 Klein 4B (OpenRouter)', 61, 6, 'Image', null, null, null, null, 'image', 0],
         ['openrouter', 'sourceful/riverflow-v2.5-pro', 'Sourceful Riverflow V2.5 Pro (OpenRouter)', 62, 5, 'Image', null, null, null, null, 'image', 0],
     ];
+    const openRouterVisionModels = [
+        ['openrouter', 'nex-agi/nex-n2-pro:free', 'Nex N2 Pro Vision (free)', 24, 9, 'Vision', 20, 200, null, null, '~6M', 131072],
+        ['openrouter', 'google/gemma-4-26b-a4b-it:free', 'Gemma 4 26B Vision (free)', 25, 9, 'Vision', 20, 200, null, null, '~6M', 262144],
+        ['openrouter', 'google/gemma-4-31b-it:free', 'Gemma 4 31B Vision (free)', 26, 9, 'Vision', 20, 200, null, null, '~6M', 262144],
+        ['openrouter', 'nvidia/nemotron-nano-12b-v2-vl:free', 'Nemotron Nano 12B VL (free)', 27, 9, 'Vision', 20, 200, null, null, '~6M', 131072],
+        ['openrouter', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'Nemotron 3 Nano Omni 30B (free)', 28, 9, 'Vision', 20, 200, null, null, '~6M', 262144],
+        ['openrouter', 'openrouter/free', 'OpenRouter Free Vision Router', 29, 9, 'Vision', 20, 200, null, null, '~6M', null],
+    ];
     const audioModels = [
         ['google', 'gemini-2.5-flash-preview-tts', 'Gemini 2.5 Flash TTS', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
         ['google', 'gemini-3.1-flash-tts-preview', 'Gemini 3.1 Flash TTS Preview', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
         ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
         ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
+        ['groq', 'canopylabs/orpheus-v1-english', 'Orpheus TTS English (Groq)', 50, 2, 'Speech', null, null, null, null, 'audio', 0],
+        ['groq', 'canopylabs/orpheus-arabic-saudi', 'Orpheus TTS Arabic Saudi (Groq)', 51, 2, 'Speech', null, null, null, null, 'audio', 0],
         ['groq', 'whisper-large-v3-turbo', 'Whisper Large V3 Turbo (Groq)', 51, 4, 'Audio', null, null, null, null, 'audio', 0],
         ['groq', 'whisper-large-v3', 'Whisper Large V3 (Groq)', 52, 5, 'Audio', null, null, null, null, 'audio', 0],
     ];
     const audioRouteCapabilities = [
         ['google', 'gemini-2.5-flash-preview-tts', 'speech', 1],
         ['google', 'gemini-3.1-flash-tts-preview', 'speech', 1],
+        ['groq', 'canopylabs/orpheus-v1-english', 'speech', 2],
+        ['groq', 'canopylabs/orpheus-arabic-saudi', 'speech', 3],
         ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'realtime_audio', 1],
         ['google', 'gemini-3.1-flash-live-preview', 'realtime_audio', 2],
         ['groq', 'whisper-large-v3-turbo', 'transcription', 1],
@@ -1082,13 +1094,23 @@ function seedModelCapabilities(db) {
                 addFallback.run(row.id, fallbackBase + embeddingModels.length + i + 1);
             }
         }
+        for (let i = 0; i < openRouterVisionModels.length; i++) {
+            const model = openRouterVisionModels[i];
+            insertCapabilityModel.run(...model);
+            const row = getModelId.get(model[0], model[1]);
+            if (row) {
+                addCapability.run(row.id, 'chat', model[3], 1);
+                addCapability.run(row.id, 'vision', i + 1, 1);
+                addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + i + 1);
+            }
+        }
         for (let i = 0; i < audioModels.length; i++) {
             const model = audioModels[i];
             insertCapabilityModel.run(...model);
             const row = getModelId.get(model[0], model[1]);
             if (row) {
                 addCapability.run(row.id, 'audio', i + 1, 1);
-                addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + i + 1);
+                addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + i + 1);
             }
         }
         for (const [platform, modelId, capability, priority] of audioRouteCapabilities) {

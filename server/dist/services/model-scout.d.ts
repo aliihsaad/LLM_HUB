@@ -14,6 +14,7 @@ export interface DiscoveredModelCandidate {
     modelId: string;
     displayName: string;
     enabledByDefault?: boolean;
+    capabilities?: DiscoveredModelCapability[];
 }
 export interface DiscoveredModelResult {
     discovered: DiscoveredModelCandidate[];
@@ -23,6 +24,7 @@ export interface DiscoveredModelResult {
     skippedKnownCount: number;
     insertedModelIds: number[];
 }
+type DiscoveredModelCapability = 'chat' | 'vision';
 /**
  * Check if a specific model is still available on the free tier.
  *
@@ -52,4 +54,5 @@ export declare function discoverNewModels(): Promise<DiscoveredModelCandidate[]>
 export declare function discoverAndPersistNewModels(): Promise<DiscoveredModelResult>;
 export declare function startModelScout(): void;
 export declare function stopModelScout(): void;
+export {};
 //# sourceMappingURL=model-scout.d.ts.map

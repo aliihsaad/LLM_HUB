@@ -54,6 +54,9 @@ describe('Models capabilities API', () => {
     expect(openrouter.capabilities.chat.configured).toBe(true);
     expect(openrouter.capabilities.embeddings.supportedModels).toBeGreaterThan(0);
     expect(openrouter.capabilities.embeddings.configured).toBe(true);
+    expect(openrouter.capabilities.vision.supportedModels).toBeGreaterThan(0);
+    expect(openrouter.capabilities.vision.configured).toBe(true);
+    expect(openrouter.capabilities.vision.status).toBe('configured');
 
     const groq = body.providers.find((p: any) => p.platform === 'groq');
     expect(groq.keyCount).toBe(0);

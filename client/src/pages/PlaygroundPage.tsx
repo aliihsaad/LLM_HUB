@@ -14,6 +14,7 @@ import { PlaygroundChatPanel } from '@/components/playground-chat-panel'
 import { RealtimeSessionPanel } from '@/components/realtime-session-panel'
 import { cn } from '@/lib/utils'
 import {
+  filterPlaygroundModelsForMode,
   getConfiguredProviderCount,
   getPlaygroundMode,
   getSupportedModelCount,
@@ -33,6 +34,16 @@ interface FallbackEntry {
   sizeLabel: string
   keyCount: number
   runtimeStatus?: 'healthy' | 'degraded' | 'unavailable'
+}
+
+interface PlaygroundModelOption {
+  modelDbId: number
+  platform: string
+  modelId: string
+  displayName: string
+  keyCount: number
+  enabled: boolean
+  capabilities?: string[]
 }
 
 interface CatalogModelEntry {
@@ -219,18 +230,30 @@ export default function PlaygroundPage() {
   const sweepJob = sweepQuery.data
 
   const availableModels = fallbackEntries.filter(e => e.keyCount > 0 && e.enabled && e.runtimeStatus !== 'unavailable')
-  const realtimeModels = useMemo(
+  const catalogModelOptions = useMemo<PlaygroundModelOption[]>(
     () => modelCatalog
-      .filter(model => model.enabled && model.keyCount > 0 && model.capabilities?.includes('realtime_audio'))
       .map(model => ({
         modelDbId: model.modelDbId ?? model.id ?? 0,
         platform: model.platform,
         modelId: model.modelId,
         displayName: model.displayName,
         keyCount: model.keyCount,
+        enabled: model.enabled,
         capabilities: model.capabilities,
       })),
     [modelCatalog],
+  )
+  const chatModelOptions = useMemo(
+    () => filterPlaygroundModelsForMode(catalogModelOptions, 'chat'),
+    [catalogModelOptions],
+  )
+  const activeModeModelOptions = useMemo(
+    () => filterPlaygroundModelsForMode(catalogModelOptions, mode),
+    [catalogModelOptions, mode],
+  )
+  const realtimeModels = useMemo(
+    () => filterPlaygroundModelsForMode(catalogModelOptions, 'realtime'),
+    [catalogModelOptions],
   )
   const definition = getPlaygroundMode(mode)
   const configuredProviders = getConfiguredProviderCount(capabilityData, mode)
@@ -244,10 +267,10 @@ export default function PlaygroundPage() {
   const sweepFailures = sweepJob?.results.filter(result => result.status === 'failed').slice(-4).reverse() ?? []
   const activeChatModelLabel = selectedModel === 'auto'
     ? 'Auto (fallback chain)'
-    : availableModels.find(m => m.modelId === selectedModel)?.displayName ?? selectedModel
-  const activeRealtimeModelLabel = modelOverride.trim()
-    ? realtimeModels.find(model => model.modelId === modelOverride.trim())?.displayName ?? modelOverride.trim()
-    : 'Auto (verified realtime default)'
+    : chatModelOptions.find(m => m.modelId === selectedModel)?.displayName ?? selectedModel
+  const activeModeModelLabel = modelOverride.trim()
+    ? activeModeModelOptions.find(model => model.modelId === modelOverride.trim())?.displayName ?? modelOverride.trim()
+    : mode === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${definition.label} route)`
   const endpoint = isGeminiMode(mode) ? geminiEndpointFor(mode, modelOverride) : definition.endpoint
 
   const activeModel = useMemo(() => {
@@ -607,7 +630,7 @@ function fileToDataUrl(file: File): Promise<string> {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto (fallback chain)</SelectItem>
-                  {availableModels.map(m => (
+                  {chatModelOptions.map(m => (
                     <SelectItem key={m.modelDbId} value={m.modelId}>
                       <span className="flex items-center gap-2">
                         <span>{m.displayName}</span>
@@ -676,7 +699,7 @@ function fileToDataUrl(file: File): Promise<string> {
         <div className="rounded-lg border border-border bg-card p-3">
           <PlaygroundChatPanel
             apiKey={keyData?.apiKey}
-            models={availableModels}
+            models={catalogModelOptions}
             realtimeModels={realtimeModels}
             capabilityData={capabilityData}
           />
@@ -799,19 +822,21 @@ function fileToDataUrl(file: File): Promise<string> {
           </div>
 
           <div className="space-y-4">
-            {mode === 'realtime' ? (
+            {mode !== 'chat' && !isGeminiMode(mode) ? (
               <div className="space-y-1.5">
-                <Label className="text-xs">Realtime model</Label>
+                <Label className="text-xs">{mode === 'realtime' ? 'Realtime model' : `${definition.label} model`}</Label>
                 <Select
                   value={modelOverride.trim() || 'auto'}
                   onValueChange={(value) => setModelOverride(value === 'auto' ? '' : value ?? '')}
                 >
                   <SelectTrigger className="w-full min-w-0">
-                    <span className="truncate">{activeRealtimeModelLabel}</span>
+                    <span className="truncate">{activeModeModelLabel}</span>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto">Auto (verified realtime default)</SelectItem>
-                    {realtimeModels.map(model => (
+                    <SelectItem value="auto">
+                      {mode === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${definition.label} route)`}
+                    </SelectItem>
+                    {activeModeModelOptions.map(model => (
                       <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
                         <span className="flex min-w-0 items-center gap-2">
                           <span className="truncate">{model.displayName}</span>
@@ -822,13 +847,13 @@ function fileToDataUrl(file: File): Promise<string> {
                   </SelectContent>
                 </Select>
               </div>
-            ) : mode !== 'chat' && (
+            ) : isGeminiMode(mode) && (
               <div className="space-y-1.5">
-                <Label className="text-xs">{isGeminiMode(mode) ? 'Gemini model path' : 'Model override'}</Label>
+                <Label className="text-xs">Gemini model path</Label>
                 <Input
                   value={modelOverride}
                   onChange={e => setModelOverride(e.target.value)}
-                  placeholder={isGeminiMode(mode) ? 'gemini-2.5-flash' : 'auto'}
+                  placeholder="gemini-2.5-flash"
                   className="font-mono text-xs"
                 />
               </div>

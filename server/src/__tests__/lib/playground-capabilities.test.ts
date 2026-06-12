@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { CapabilitiesResponse } from 'llmhub-shared/types.js';
 import {
   getConfiguredProviderCount,
+  getPlaygroundRouteCapability,
   getPlaygroundMode,
   getSupportedModelCount,
+  filterPlaygroundModelsForMode,
   isPlaygroundModeConfigured,
   PLAYGROUND_MODES,
 } from 'llmhub-shared/playground.js';
@@ -79,5 +81,22 @@ describe('playground capability helpers', () => {
     expect(isPlaygroundModeConfigured(capabilities, 'embeddings')).toBe(false);
     expect(getConfiguredProviderCount(capabilities, 'embeddings')).toBe(0);
     expect(getSupportedModelCount(capabilities, 'embeddings')).toBe(3);
+  });
+
+  it('filters model selectors to models that support the active route capability', () => {
+    const models = [
+      { modelId: 'chat-model', enabled: true, keyCount: 1, capabilities: ['chat'] },
+      { modelId: 'vision-model', enabled: true, keyCount: 1, capabilities: ['chat', 'vision'] },
+      { modelId: 'speech-model', enabled: true, keyCount: 1, capabilities: ['audio', 'speech'] },
+      { modelId: 'realtime-model', enabled: true, keyCount: 1, capabilities: ['audio', 'realtime_audio'] },
+      { modelId: 'missing-key', enabled: true, keyCount: 0, capabilities: ['vision'] },
+      { modelId: 'disabled', enabled: false, keyCount: 1, capabilities: ['vision'] },
+    ];
+
+    expect(getPlaygroundRouteCapability('speech')).toBe('speech');
+    expect(getPlaygroundRouteCapability('realtime')).toBe('realtime_audio');
+    expect(filterPlaygroundModelsForMode(models, 'vision').map(model => model.modelId)).toEqual(['vision-model']);
+    expect(filterPlaygroundModelsForMode(models, 'speech').map(model => model.modelId)).toEqual(['speech-model']);
+    expect(filterPlaygroundModelsForMode(models, 'realtime').map(model => model.modelId)).toEqual(['realtime-model']);
   });
 });

@@ -24,7 +24,9 @@ export function classifyProviderError(err) {
         || msg.includes('forbidden')
         || msg.includes('subscription')
         || msg.includes('requires a paid')
-        || msg.includes('do not have access')) {
+        || msg.includes('do not have access')
+        || msg.includes('requires terms acceptance')
+        || msg.includes('accept the terms')) {
         return { category: 'model_unavailable', retryable: true, skipModel: true, keyCooldownMs: 0 };
     }
     if (msg.includes('429')

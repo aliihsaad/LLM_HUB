@@ -24,6 +24,7 @@ import { RealtimeSessionPanel } from '@/components/realtime-session-panel'
 import { cn } from '@/lib/utils'
 import {
   getConfiguredProviderCount,
+  filterPlaygroundModelsForMode,
   getPlaygroundMode,
   getSupportedModelCount,
   isPlaygroundModeConfigured,
@@ -205,9 +206,13 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
 
   const activeAction = CHAT_ACTIONS.find(item => item.id === action) ?? CHAT_ACTIONS[0]
   const activeDefinition = getPlaygroundMode(action)
-  const modelOptions = action === 'realtime' ? realtimeModels : models
+  const baseModelOptions = action === 'realtime' ? realtimeModels : models
+  const modelOptions = useMemo(
+    () => filterPlaygroundModelsForMode(baseModelOptions, action),
+    [action, baseModelOptions],
+  )
   const activeModelLabel = selectedModel === 'auto'
-    ? 'Auto (fallback chain)'
+    ? action === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${activeAction.label} route)`
     : modelOptions.find(model => model.modelId === selectedModel)?.displayName ?? selectedModel
 
   const history = useMemo(() => {
@@ -588,7 +593,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="auto">
-                  {action === 'realtime' ? 'Auto (verified realtime default)' : 'Auto (fallback chain)'}
+                  {action === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${activeAction.label} route)`}
                 </SelectItem>
                 {modelOptions.map(model => (
                   <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>

@@ -22,6 +22,7 @@ export interface DiscoveredModelCandidate {
   modelId: string;
   displayName: string;
   enabledByDefault?: boolean;
+  capabilities?: DiscoveredModelCapability[];
 }
 
 export interface DiscoveredModelResult {
@@ -62,6 +63,33 @@ interface GoogleModelListResponse {
   }>;
 }
 
+type DiscoveredModelCapability = 'chat' | 'vision';
+
+interface OpenAICompatModelListEntry {
+  id?: string;
+  name?: string;
+  architecture?: {
+    input_modalities?: string[];
+    output_modalities?: string[];
+    modality?: string;
+  };
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+  };
+}
+
+function isZeroPrice(value: string | undefined): boolean {
+  if (value == null) return false;
+  return Number(value) === 0;
+}
+
+function supportsImageInput(entry: OpenAICompatModelListEntry): boolean {
+  const inputModalities = entry.architecture?.input_modalities ?? [];
+  if (inputModalities.some(modality => modality.toLowerCase() === 'image')) return true;
+  return entry.architecture?.modality?.toLowerCase().includes('image') === true;
+}
+
 async function discoverGoogleModels(apiKey: string, knownSet: Set<string>): Promise<DiscoveredModelCandidate[]> {
   const res = await fetch(`${GOOGLE_MODELS_API_BASE}/models?key=${encodeURIComponent(apiKey)}`);
   if (!res.ok) return [];
@@ -82,6 +110,7 @@ async function discoverGoogleModels(apiKey: string, knownSet: Set<string>): Prom
       modelId,
       displayName: entry.displayName ?? displayName,
       enabledByDefault: true,
+      capabilities: ['chat', 'vision'],
     });
   }
 
@@ -311,7 +340,7 @@ export async function discoverNewModels(): Promise<DiscoveredModelCandidate[]> {
 
       if (!res.ok) continue;
 
-      const data = await res.json() as { data?: Array<{ id: string; name?: string }> };
+      const data = await res.json() as { data?: OpenAICompatModelListEntry[] };
 
       let discoveredForPlatform = 0;
       for (const entry of data.data ?? []) {
@@ -321,15 +350,22 @@ export async function discoverNewModels(): Promise<DiscoveredModelCandidate[]> {
         // Heuristic: explicit free models become routable immediately. Credit-
         // based/trial providers are persisted disabled so the catalog stays
         // current without silently routing into paid-only models.
-        const isLikelyFree = /:free|free-tier|free model|trial|sandbox/i.test(`${entry.id} ${entry.name ?? ''}`);
+        const hasZeroPricing = platform === 'openrouter' && isZeroPrice(entry.pricing?.prompt) && isZeroPrice(entry.pricing?.completion);
+        const isLikelyFree = /:free|free-tier|free model|trial|sandbox/i.test(`${entry.id} ${entry.name ?? ''}`) || hasZeroPricing;
         const shouldPersist = isLikelyFree || CATALOG_SYNC_PLATFORMS.has(platform as Platform);
         if (!shouldPersist) continue;
+
+        const capabilities: DiscoveredModelCapability[] = ['chat'];
+        if (platform === 'openrouter' && supportsImageInput(entry)) {
+          capabilities.push('vision');
+        }
 
         discoveries.push({
           platform: platform as Platform,
           modelId: entry.id,
           displayName: entry.name ?? entry.id,
           enabledByDefault: isLikelyFree,
+          capabilities,
         });
 
         discoveredForPlatform++;
@@ -391,9 +427,9 @@ export async function discoverAndPersistNewModels(): Promise<DiscoveredModelResu
     VALUES (?, 'unknown', ?, ?)
   `);
 
-  const addToCategory = db.prepare(`
+  const addCapability = db.prepare(`
     INSERT OR IGNORE INTO model_capabilities (model_db_id, capability, priority, enabled)
-    VALUES (?, 'chat', 999, ?)
+    VALUES (?, ?, 999, ?)
   `);
 
   const getModelId = db.prepare(`
@@ -444,9 +480,11 @@ export async function discoverAndPersistNewModels(): Promise<DiscoveredModelResu
       updateCategory.run(categorize.category, categorize.specializations.join(','), modelDbId);
       insertFallback.run(modelDbId, nextPriority++, enabled);
       insertAvailability.run(modelDbId, discoverySource, enabled);
-      // New discovered rows are assumed chat-capable by default so the model
-      // is included in standard routing unless edited explicitly.
-      addToCategory.run(modelDbId, enabled);
+      // New discovered rows are assumed chat-capable by default. Providers
+      // that expose modality metadata can add narrower capability routes too.
+      for (const capability of new Set(candidate.capabilities ?? ['chat'])) {
+        addCapability.run(modelDbId, capability, enabled);
+      }
 
       inserted.push(candidate);
       insertedModelIds.push(modelDbId);

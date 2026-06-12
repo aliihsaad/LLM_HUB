@@ -16,6 +16,8 @@ import type {
   ImagesResponse,
   ImageVariationRequest,
   Platform,
+  SpeechRequest,
+  SpeechResult,
 } from 'llmhub-shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 
@@ -267,6 +269,51 @@ export class OpenAICompatProvider extends BaseProvider {
     return this.forwardAudioText(apiKey, request, modelId, 'translations');
   }
 
+  async createSpeech(
+    apiKey: string,
+    request: SpeechRequest,
+    modelId: string,
+  ): Promise<SpeechResult> {
+    const body: Record<string, unknown> = {
+      model: modelId,
+      input: request.input,
+      voice: this.platform === 'groq' ? toGroqSpeechVoice(request.voice, modelId) : request.voice,
+      response_format: request.response_format ?? 'wav',
+    };
+    if (typeof request.speed === 'number') body.speed = request.speed;
+    if (request.instructions) body.instructions = request.instructions;
+
+    const res = await this.fetchWithTimeout(`${this.baseUrl}/audio/speech`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        ...this.extraHeaders,
+      },
+      body: JSON.stringify(body),
+    }, 120000);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+    }
+
+    const contentType = res.headers.get('content-type') ?? `audio/${request.response_format ?? 'wav'}`;
+    if (contentType.includes('application/json')) {
+      const err = await res.json().catch(() => ({}));
+      throwIfOpenAIErrorBody(this.name, err);
+      throw new Error(`${this.name} speech generation returned JSON instead of audio`);
+    }
+
+    const data = new Uint8Array(await res.arrayBuffer());
+    return {
+      data,
+      contentType,
+      format: request.response_format ?? 'wav',
+      _routed_via: { platform: this.platform, model: modelId },
+    };
+  }
+
   async validateKey(apiKey: string): Promise<boolean> {
     // Note: transport errors (DNS / timeout / TLS) propagate to the caller.
     // health.ts catches them and marks status='error' WITHOUT incrementing
@@ -402,6 +449,18 @@ function throwIfOpenAIErrorBody(providerName: string, data: unknown): void {
   }
 
   throw new Error(`${providerName} API error: Provider returned error`);
+}
+
+function toGroqSpeechVoice(voice: string, modelId: string): string {
+  const normalized = voice.toLowerCase().trim();
+  const arabicVoices = new Set(['fahad']);
+  const englishVoices = new Set(['austin', 'hannah', 'troy']);
+
+  if (modelId.includes('arabic')) {
+    return arabicVoices.has(normalized) ? normalized : 'fahad';
+  }
+
+  return englishVoices.has(normalized) ? normalized : 'austin';
 }
 
 function buildAudioFormData(
