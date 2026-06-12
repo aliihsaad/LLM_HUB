@@ -81,7 +81,7 @@ describe('Audio speech proxy route', () => {
     });
 
     expect(status).toBe(200);
-    expect(headers.get('X-Routed-Via')).toContain('google/gemini-2.5-flash-preview-tts');
+    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.1-flash-tts-preview');
     expect(headers.get('Content-Type')).toContain('audio/wav');
     expect((body as Buffer).subarray(0, 4).toString('ascii')).toBe('RIFF');
     expect(providerBody.contents[0].parts[0].text).toContain('Say only the following transcript');

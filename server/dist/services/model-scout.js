@@ -12,6 +12,39 @@ const CATALOG_SYNC_PLATFORMS = new Set([
     'ovhcloud',
 ]);
 const MAX_DISCOVERED_PER_PLATFORM = 100;
+const GOOGLE_MODELS_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GOOGLE_FREE_CHAT_MODELS = new Map([
+    ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+    ['gemini-3-flash-preview', 'Gemini 3 Flash Preview'],
+    ['gemini-2.5-pro', 'Gemini 2.5 Pro'],
+    ['gemini-2.5-flash', 'Gemini 2.5 Flash'],
+    ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
+    ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite'],
+]);
+async function discoverGoogleModels(apiKey, knownSet) {
+    const res = await fetch(`${GOOGLE_MODELS_API_BASE}/models?key=${encodeURIComponent(apiKey)}`);
+    if (!res.ok)
+        return [];
+    const data = await res.json();
+    const discoveries = [];
+    for (const entry of data.models ?? []) {
+        const modelId = entry.name?.replace(/^models\//, '');
+        if (!modelId || knownSet.has(modelId))
+            continue;
+        if (!entry.supportedGenerationMethods?.includes('generateContent'))
+            continue;
+        const displayName = GOOGLE_FREE_CHAT_MODELS.get(modelId);
+        if (!displayName)
+            continue;
+        discoveries.push({
+            platform: 'google',
+            modelId,
+            displayName: entry.displayName ?? displayName,
+            enabledByDefault: true,
+        });
+    }
+    return discoveries;
+}
 /**
  * Check if a specific model is still available on the free tier.
  *
@@ -173,9 +206,6 @@ export async function discoverNewModels() {
   `).all();
     for (const { platform } of platforms) {
         const provider = getProvider(platform);
-        if (!provider || typeof provider.baseUrl !== 'string')
-            continue;
-        const baseUrl = provider.baseUrl;
         const keyRow = db.prepare(`
       SELECT encrypted_key, iv, auth_tag FROM api_keys
       WHERE platform = ? AND enabled = 1
@@ -184,6 +214,20 @@ export async function discoverNewModels() {
         if (!keyRow)
             continue;
         const apiKey = decrypt(keyRow.encrypted_key, keyRow.iv, keyRow.auth_tag);
+        const knownModels = db.prepare(`SELECT model_id FROM models WHERE platform = ?`).all(platform);
+        const knownSet = new Set(knownModels.map(m => m.model_id));
+        if (platform === 'google') {
+            try {
+                discoveries.push(...await discoverGoogleModels(apiKey, knownSet));
+            }
+            catch (err) {
+                console.warn('[ModelScout] Could not list models for google:', err);
+            }
+            continue;
+        }
+        if (!provider || typeof provider.baseUrl !== 'string')
+            continue;
+        const baseUrl = provider.baseUrl;
         try {
             const res = await fetch(`${baseUrl}/models`, {
                 headers: { 'Authorization': `Bearer ${apiKey}` },
@@ -191,8 +235,6 @@ export async function discoverNewModels() {
             if (!res.ok)
                 continue;
             const data = await res.json();
-            const knownModels = db.prepare(`SELECT model_id FROM models WHERE platform = ?`).all(platform);
-            const knownSet = new Set(knownModels.map(m => m.model_id));
             let discoveredForPlatform = 0;
             for (const entry of data.data ?? []) {
                 if (!entry.id)

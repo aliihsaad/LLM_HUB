@@ -31,11 +31,8 @@ function AuthShell({
         <div className="pointer-events-none absolute -top-32 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-primary/12 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-24 right-8 h-48 w-48 rounded-full bg-sky-400/10 blur-3xl" />
         <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-sm flex-col justify-center">
-        <div className="mb-5 flex items-center gap-2.5">
-          <img src={llmHubLogo} alt="" className="h-28 w-80 shrink-0 object-cover" aria-hidden="true" />
-          <span className="ml-6 inline-flex h-5 min-w-fit items-center rounded-full border border-primary/40 bg-gradient-to-br from-primary/95 to-primary/65 px-2.5 py-0.5 text-[8px] font-semibold tracking-[0.24em] text-primary-foreground shadow-[0_10px_20px_rgba(59,130,246,0.25)]">
-            PRO MAX
-          </span>
+        <div className="mb-5 flex items-center">
+          <img src={llmHubLogo} alt="LLM Hub" className="h-24 w-80 shrink-0 object-contain object-left" />
         </div>
         <Card className="rounded-lg">
           <CardHeader>

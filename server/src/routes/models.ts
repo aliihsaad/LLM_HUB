@@ -74,6 +74,20 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
     ORDER BY COALESCE(fc.priority, m.intelligence_rank) ASC
   `).all() as any[];
 
+  const capabilities = db.prepare(`
+    SELECT mc.model_db_id, mc.capability
+    FROM model_capabilities mc
+    JOIN models m ON m.id = mc.model_db_id
+    WHERE m.enabled = 1 AND mc.enabled = 1
+    ORDER BY mc.priority ASC, mc.capability ASC
+  `).all() as { model_db_id: number; capability: string }[];
+  const capabilitiesByModel = new Map<number, string[]>();
+  for (const capability of capabilities) {
+    const existing = capabilitiesByModel.get(capability.model_db_id) ?? [];
+    existing.push(capability.capability);
+    capabilitiesByModel.set(capability.model_db_id, existing);
+  }
+
   // Count keys per platform
   const keyCounts = db.prepare(`
     SELECT platform, COUNT(*) as count
@@ -86,6 +100,7 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
 
   const result = models.map(m => ({
     id: m.id,
+    modelDbId: m.id,
     platform: m.platform,
     modelId: m.model_id,
     displayName: m.display_name,
@@ -103,6 +118,7 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
     fallbackEnabled: m.fallback_enabled === 1,
     hasProvider: hasProvider(m.platform),
     keyCount: keyCountMap.get(m.platform) ?? 0,
+    capabilities: capabilitiesByModel.get(m.id) ?? [],
   }));
 
   res.json(result);

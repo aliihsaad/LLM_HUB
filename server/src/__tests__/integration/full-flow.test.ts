@@ -165,9 +165,10 @@ describe('Full Integration Flow', () => {
   });
 
   it('Step 12: Explicit disabled model returns 400 with disabled reason', async () => {
-    // gemini-2.5-pro is disabled (V1 migration). Reuse it as a known-disabled fixture.
+    // Gemini 3.1 Pro Preview is paid-only in the current Gemini Developer API
+    // pricing table, so the catalog keeps it disabled as a known fixture.
     const { status, body } = await req(app, 'POST', '/v1/chat/completions', {
-      model: 'gemini-2.5-pro',
+      model: 'gemini-3.1-pro-preview',
       messages: [{ role: 'user', content: 'hi' }],
     });
     expect(status).toBe(400);

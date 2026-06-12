@@ -42,6 +42,7 @@ export async function initDb(dbPath) {
     migrateModelsV11(db);
     migrateModelsV12(db);
     migrateModelsV13(db);
+    migrateModelsV14(db);
     seedModelCapabilities(db);
     ensureUnifiedKey(db);
     // Auto-categorize all models on startup
@@ -982,23 +983,77 @@ function seedModelCapabilities(db) {
         ['mistral', 'mistral-embed', 'Mistral Embed', 92, 5, 'Embedding', null, null, null, null, 'embedding', 8192],
     ];
     const imageModels = [
-        ['google', 'gemini-3.1-flash-image-preview', 'Gemini 3.1 Flash Image Preview', 40, 5, 'Image', 5, 20, 250000, null, 'image', 1048576],
+        ['google', 'gemini-3.1-flash-image', 'Gemini 3.1 Flash Image', 40, 5, 'Image', null, null, 250000, null, 'image', 1048576],
+        ['google', 'gemini-2.5-flash-image', 'Gemini 2.5 Flash Image', 45, 5, 'Image', null, null, 250000, null, 'image', 1048576],
+        ['openrouter', 'sourceful/riverflow-v2.5-fast', 'Sourceful Riverflow V2.5 Fast (OpenRouter)', 60, 6, 'Image', null, null, null, null, 'image', 0],
+        ['openrouter', 'black-forest-labs/flux.2-klein-4b', 'FLUX.2 Klein 4B (OpenRouter)', 61, 6, 'Image', null, null, null, null, 'image', 0],
+        ['openrouter', 'sourceful/riverflow-v2.5-pro', 'Sourceful Riverflow V2.5 Pro (OpenRouter)', 62, 5, 'Image', null, null, null, null, 'image', 0],
     ];
     const audioModels = [
         ['google', 'gemini-2.5-flash-preview-tts', 'Gemini 2.5 Flash TTS', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
+        ['google', 'gemini-3.1-flash-tts-preview', 'Gemini 3.1 Flash TTS Preview', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
+        ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
         ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
         ['groq', 'whisper-large-v3-turbo', 'Whisper Large V3 Turbo (Groq)', 51, 4, 'Audio', null, null, null, null, 'audio', 0],
         ['groq', 'whisper-large-v3', 'Whisper Large V3 (Groq)', 52, 5, 'Audio', null, null, null, null, 'audio', 0],
     ];
     const audioRouteCapabilities = [
         ['google', 'gemini-2.5-flash-preview-tts', 'speech', 1],
+        ['google', 'gemini-3.1-flash-tts-preview', 'speech', 1],
         ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'realtime_audio', 1],
+        ['google', 'gemini-3.1-flash-live-preview', 'realtime_audio', 2],
         ['groq', 'whisper-large-v3-turbo', 'transcription', 1],
         ['groq', 'whisper-large-v3-turbo', 'translation', 1],
         ['groq', 'whisper-large-v3', 'transcription', 2],
         ['groq', 'whisper-large-v3', 'translation', 2],
     ];
     const apply = db.transaction(() => {
+        const updateCapabilityPriority = db.prepare(`
+      UPDATE model_capabilities
+         SET priority = ?, enabled = ?
+       WHERE model_db_id = ? AND capability = ?
+    `);
+        const disableLegacyGoogleImagePreview = db.prepare(`
+      UPDATE models
+         SET enabled = 0
+       WHERE platform = 'google' AND model_id = 'gemini-3.1-flash-image-preview'
+    `);
+        const disableLegacyGoogleImagePreviewCapabilities = db.prepare(`
+      UPDATE model_capabilities
+         SET enabled = 0
+       WHERE model_db_id IN (
+         SELECT id FROM models
+          WHERE platform = 'google' AND model_id = 'gemini-3.1-flash-image-preview'
+       )
+    `);
+        const disableImageOnlyOpenRouterChatCapabilities = db.prepare(`
+      UPDATE model_capabilities
+         SET enabled = 0
+       WHERE capability = 'chat'
+         AND model_db_id IN (
+           SELECT id FROM models
+            WHERE platform = 'openrouter'
+              AND model_id IN (
+                'sourceful/riverflow-v2.5-fast',
+                'black-forest-labs/flux.2-klein-4b',
+                'sourceful/riverflow-v2.5-pro'
+              )
+         )
+    `);
+        const clearStaleOpenRouterImageModalityBlocks = db.prepare(`
+      DELETE FROM model_runtime_health
+       WHERE last_error_category = 'model_unavailable'
+         AND last_error LIKE '%requested output modalities: image, text%'
+         AND model_db_id IN (
+           SELECT id FROM models
+            WHERE platform = 'openrouter'
+              AND model_id IN (
+                'sourceful/riverflow-v2.5-fast',
+                'black-forest-labs/flux.2-klein-4b',
+                'sourceful/riverflow-v2.5-pro'
+              )
+         )
+    `);
         for (const model of chatModels) {
             addCapability.run(model.id, 'chat', model.intelligence_rank, model.enabled);
         }
@@ -1038,9 +1093,15 @@ function seedModelCapabilities(db) {
         }
         for (const [platform, modelId, capability, priority] of audioRouteCapabilities) {
             const row = getModelId.get(platform, modelId);
-            if (row)
+            if (row) {
                 addCapability.run(row.id, capability, priority, 1);
+                updateCapabilityPriority.run(priority, 1, row.id, capability);
+            }
         }
+        disableLegacyGoogleImagePreview.run();
+        disableLegacyGoogleImagePreviewCapabilities.run();
+        disableImageOnlyOpenRouterChatCapabilities.run();
+        clearStaleOpenRouterImageModalityBlocks.run();
     });
     apply();
 }
@@ -1101,6 +1162,87 @@ function migrateModelsV13(db) {
             if (row)
                 addFallback.run(row.id, priority++);
         }
+    });
+    apply();
+}
+/**
+ * V14 (June 2026): refresh Google Gemini free-tier catalog from the current
+ * Gemini Developer API pricing/model docs.
+ *
+ * Google's public /models endpoint does not expose free-tier flags, so keep
+ * paid-only media and Pro-preview rows out of default chat routing. The model
+ * scout still probes availability after startup and marks each row free,
+ * rate-limited, deprecated, or error based on the configured API key.
+ */
+function migrateModelsV14(db) {
+    const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank, size_label,
+      rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window, enabled
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+    const currentGoogleFreeModels = [
+        ['google', 'gemini-3.5-flash', 'Gemini 3.5 Flash', 1, 5, 'Frontier', 10, 20, 250000, null, '~3M', 1048576, 1],
+        ['google', 'gemini-3-flash-preview', 'Gemini 3 Flash Preview', 2, 5, 'Frontier', 10, 20, 250000, null, '~3M', 1048576, 1],
+        ['google', 'gemini-2.5-pro', 'Gemini 2.5 Pro', 3, 8, 'Frontier', 5, 20, 250000, null, '~3M', 1048576, 1],
+        ['google', 'gemini-2.5-flash', 'Gemini 2.5 Flash', 4, 5, 'Large', 10, 20, 250000, null, '~3M', 1048576, 1],
+        ['google', 'gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite', 8, 3, 'Medium', 15, 20, 250000, null, '~3M', 1048576, 1],
+        ['google', 'gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite', 9, 3, 'Medium', 15, 20, 250000, null, '~3M', 1048576, 1],
+        ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 46, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768, 1],
+        ['google', 'gemini-3.1-flash-tts-preview', 'Gemini 3.1 Flash TTS Preview', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192, 1],
+        ['google', 'gemini-2.5-flash-preview-tts', 'Gemini 2.5 Flash TTS', 51, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192, 1],
+        ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768, 1],
+    ];
+    const upsertMetadata = db.prepare(`
+    UPDATE models
+       SET display_name = ?,
+           intelligence_rank = ?,
+           speed_rank = ?,
+           size_label = ?,
+           rpm_limit = ?,
+           rpd_limit = ?,
+           tpm_limit = ?,
+           tpd_limit = ?,
+           monthly_token_budget = ?,
+           context_window = ?,
+           enabled = ?
+     WHERE platform = ? AND model_id = ?
+  `);
+    const disablePaidOrSuperseded = db.prepare(`
+    UPDATE models
+       SET enabled = 0
+     WHERE platform = 'google'
+       AND model_id IN (
+         'gemini-3.1-pro-preview',
+         'gemini-3.1-pro-preview-customtools',
+         'gemini-3.1-flash-lite-preview'
+       )
+  `);
+    const addFallback = db.prepare(`
+    INSERT OR IGNORE INTO fallback_config (model_db_id, priority, enabled)
+    VALUES (?, ?, ?)
+  `);
+    const syncFallbackEnabled = db.prepare(`
+    UPDATE fallback_config
+       SET enabled = (SELECT enabled FROM models WHERE models.id = fallback_config.model_db_id)
+     WHERE model_db_id IN (SELECT id FROM models WHERE platform = 'google')
+  `);
+    const getModel = db.prepare('SELECT id, enabled FROM models WHERE platform = ? AND model_id = ?');
+    const apply = db.transaction(() => {
+        for (const model of currentGoogleFreeModels) {
+            insert.run(...model);
+            upsertMetadata.run(model[2], model[3], model[4], model[5], model[6], model[7], model[8], model[9], model[10], model[11], model[12], model[0], model[1]);
+        }
+        disablePaidOrSuperseded.run();
+        const maxPriority = db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get().mx;
+        let priority = maxPriority + 1;
+        for (const model of currentGoogleFreeModels) {
+            const row = getModel.get(model[0], model[1]);
+            if (row)
+                addFallback.run(row.id, priority++, row.enabled);
+        }
+        syncFallbackEnabled.run();
     });
     apply();
 }

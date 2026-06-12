@@ -137,6 +137,136 @@ describe('OpenAICompatProvider', () => {
     expect(result._routed_via).toEqual({ platform: 'groq', model: 'embed-model' });
   });
 
+  it('should generate images through OpenRouter image-only chat modalities', async () => {
+    const openrouter = new OpenAICompatProvider({
+      platform: 'openrouter',
+      name: 'OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+    });
+    let capturedUrl = '';
+    let capturedBody: any = null;
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      capturedUrl = url as string;
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{
+            message: {
+              images: [{ image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }],
+            },
+          }],
+        }),
+      } as any;
+    });
+
+    const result = await openrouter.createImage(
+      'my-key',
+      {
+        prompt: 'A dashboard icon',
+        response_format: 'b64_json',
+        size: '1536x1024',
+      },
+      'sourceful/riverflow-v2.5-fast',
+    );
+
+    expect(capturedUrl).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(capturedBody).toMatchObject({
+      model: 'sourceful/riverflow-v2.5-fast',
+      messages: [{ role: 'user', content: 'A dashboard icon' }],
+      modalities: ['image'],
+      stream: false,
+      image_config: { aspect_ratio: '3:2' },
+    });
+    expect(result.data[0]).toEqual({
+      b64_json: 'aW1hZ2U=',
+    });
+    expect(result._routed_via).toEqual({ platform: 'openrouter', model: 'sourceful/riverflow-v2.5-fast' });
+  });
+
+  it('should request text and image modalities for OpenRouter Gemini image models', async () => {
+    const openrouter = new OpenAICompatProvider({
+      platform: 'openrouter',
+      name: 'OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+    });
+    let capturedBody: any = null;
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{
+            message: {
+              content: 'Prompt rewrite',
+              images: [{ image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }],
+            },
+          }],
+        }),
+      } as any;
+    });
+
+    const result = await openrouter.createImage(
+      'my-key',
+      {
+        prompt: 'A dashboard icon',
+        response_format: 'b64_json',
+      },
+      'google/gemini-3.1-flash-image-preview',
+    );
+
+    expect(capturedBody.modalities).toEqual(['image', 'text']);
+    expect(result.data[0]).toEqual({
+      b64_json: 'aW1hZ2U=',
+      revised_prompt: 'Prompt rewrite',
+    });
+  });
+
+  it('should send image edit uploads to OpenRouter as image_url content parts', async () => {
+    const openrouter = new OpenAICompatProvider({
+      platform: 'openrouter',
+      name: 'OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+    });
+    let capturedBody: any = null;
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{
+            message: {
+              images: [{ imageUrl: { url: 'data:image/png;base64,ZWRpdA==' } }],
+            },
+          }],
+        }),
+      } as any;
+    });
+
+    const result = await openrouter.editImage(
+      'my-key',
+      {
+        prompt: 'Make the background transparent',
+        images: [{
+          filename: 'source.png',
+          contentType: 'image/png',
+          data: Buffer.from('source-image'),
+        }],
+        response_format: 'url',
+      },
+      'sourceful/riverflow-v2.5-fast',
+    );
+
+    expect(capturedBody.messages[0].content).toEqual([
+      { type: 'text', text: 'Make the background transparent' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from('source-image').toString('base64')}` } },
+    ]);
+    expect(result.data[0]).toEqual({ url: 'data:image/png;base64,ZWRpdA==' });
+  });
+
   it('should forward transcription requests to the OpenAI-compatible audio endpoint', async () => {
     let capturedUrl = '';
     let capturedHeaders: Record<string, string> = {};

@@ -74,6 +74,7 @@ interface TokenUsageData {
     effectiveBudget: number
     budget: number
     runtimeStatus: string
+    capabilities?: string[]
   }[]
 }
 
@@ -376,8 +377,8 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-sm">Monthly token budget</CardTitle>
-            <CardDescription>Monitor provider-level allocation and remaining quota for this cycle.</CardDescription>
+            <CardTitle className="text-sm">Configured model budget</CardTitle>
+            <CardDescription>Monitor chat and endpoint-specific models configured for this cycle.</CardDescription>
           </div>
           <Badge variant="outline" className={`text-[10px] uppercase ${status.tone}`}>
             {status.label}
@@ -461,6 +462,18 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
                   <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground/80">
                     {model.modelId}
                   </div>
+                  {model.capabilities && model.capabilities.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {model.capabilities.slice(0, 3).map(capability => (
+                        <span
+                          key={capability}
+                          className="rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                        >
+                          {capability}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted/50">
                     <div
                       className="h-full bg-foreground/40"
@@ -614,7 +627,7 @@ export default function FallbackPage() {
   const allEntries = localEntries ?? entries
   const displayEntries = allEntries.filter(e => e.keyCount > 0)
   const unconfiguredPlatforms = [...new Set(allEntries.filter(e => e.keyCount === 0).map(e => e.platform))]
-  const hasTokenData = !!tokenUsage && tokenUsage.totalBudget > 0
+  const hasTokenData = !!tokenUsage && tokenUsage.models.length > 0
   const noData = !isLoading && allEntries.length === 0
 
   const sensors = useSensors(

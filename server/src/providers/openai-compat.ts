@@ -2,12 +2,19 @@ import type {
   ChatMessage,
   ChatCompletionResponse,
   ChatCompletionChunk,
+  ChatContentPart,
   AudioTextResult,
   AudioTranscriptionRequest,
   AudioTranslationRequest,
   EmbeddingInput,
   EmbeddingOptions,
   EmbeddingResponse,
+  ImageData,
+  ImageEditRequest,
+  ImageFileUpload,
+  ImageGenerationRequest,
+  ImagesResponse,
+  ImageVariationRequest,
   Platform,
 } from 'llmhub-shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
@@ -178,6 +185,72 @@ export class OpenAICompatProvider extends BaseProvider {
     return data;
   }
 
+  async createImage(
+    apiKey: string,
+    request: ImageGenerationRequest,
+    modelId: string,
+  ): Promise<ImagesResponse> {
+    if (this.platform !== 'openrouter') return super.createImage(apiKey, request, modelId);
+
+    return this.createOpenRouterImage(
+      apiKey,
+      [{ role: 'user', content: request.prompt }],
+      modelId,
+      request,
+      'OpenRouter image generation returned no image data',
+    );
+  }
+
+  async editImage(
+    apiKey: string,
+    request: ImageEditRequest,
+    modelId: string,
+  ): Promise<ImagesResponse> {
+    if (this.platform !== 'openrouter') return super.editImage(apiKey, request, modelId);
+
+    const content: ChatContentPart[] = [
+      { type: 'text', text: request.prompt },
+      ...request.images.map(imageFileToOpenRouterPart),
+    ];
+
+    if (request.mask) {
+      content.push(
+        { type: 'text', text: 'Use the provided mask as the editable region.' },
+        imageFileToOpenRouterPart(request.mask),
+      );
+    }
+
+    return this.createOpenRouterImage(
+      apiKey,
+      [{ role: 'user', content }],
+      modelId,
+      request,
+      'OpenRouter image edit returned no image data',
+    );
+  }
+
+  async createImageVariation(
+    apiKey: string,
+    request: ImageVariationRequest,
+    modelId: string,
+  ): Promise<ImagesResponse> {
+    if (this.platform !== 'openrouter') return super.createImageVariation(apiKey, request, modelId);
+
+    return this.createOpenRouterImage(
+      apiKey,
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Create a variation of this image while preserving its main subject and composition.' },
+          imageFileToOpenRouterPart(request.image),
+        ],
+      }],
+      modelId,
+      request,
+      'OpenRouter image variation returned no image data',
+    );
+  }
+
   async transcribeAudio(
     apiKey: string,
     request: AudioTranscriptionRequest,
@@ -244,6 +317,71 @@ export class OpenAICompatProvider extends BaseProvider {
       _routed_via: { platform: this.platform, model: modelId },
     };
   }
+
+  private async createOpenRouterImage(
+    apiKey: string,
+    messages: Array<{ role: 'user'; content: string | ChatContentPart[] }>,
+    modelId: string,
+    request: Pick<ImageGenerationRequest, 'size' | 'response_format'>,
+    emptyMessage: string,
+  ): Promise<ImagesResponse> {
+    const imageConfig = toOpenRouterImageConfig(request.size);
+    const modalities = getOpenRouterImageModalities(modelId);
+    const res = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        ...this.extraHeaders,
+      },
+      body: JSON.stringify({
+        model: modelId,
+        messages,
+        modalities,
+        stream: false,
+        ...(imageConfig ? { image_config: imageConfig } : {}),
+      }),
+    }, 120000);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+    }
+
+    const data = await res.json() as OpenRouterImageResponse;
+    throwIfOpenAIErrorBody(this.name, data);
+
+    const message = data.choices?.[0]?.message;
+    const revisedPrompt = typeof message?.content === 'string' ? message.content.trim() : '';
+    const images = (message?.images ?? [])
+      .map(readOpenRouterImageUrl)
+      .filter((url): url is string => Boolean(url))
+      .map(url => toImageData(url, request.response_format ?? 'b64_json', revisedPrompt));
+
+    if (images.length === 0) throw new Error(emptyMessage);
+
+    return {
+      created: Math.floor(Date.now() / 1000),
+      data: images,
+      _routed_via: { platform: this.platform, model: modelId },
+    };
+  }
+}
+
+interface OpenRouterImageItem {
+  imageUrl?: { url?: string };
+  image_url?: { url?: string };
+  url?: string;
+}
+
+interface OpenRouterImageResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      images?: OpenRouterImageItem[];
+    };
+  }>;
+  error?: { message?: string };
 }
 
 function throwIfOpenAIErrorBody(providerName: string, data: unknown): void {
@@ -292,6 +430,51 @@ function buildAudioFormData(
   }
 
   return form;
+}
+
+function imageFileToOpenRouterPart(file: ImageFileUpload): ChatContentPart {
+  const base64 = Buffer.from(file.data).toString('base64');
+  return {
+    type: 'image_url',
+    image_url: {
+      url: `data:${file.contentType};base64,${base64}`,
+    },
+  };
+}
+
+function toOpenRouterImageConfig(size?: string): { aspect_ratio?: string } | undefined {
+  switch (size) {
+    case '1024x1024':
+      return { aspect_ratio: '1:1' };
+    case '1536x1024':
+      return { aspect_ratio: '3:2' };
+    case '1024x1536':
+      return { aspect_ratio: '2:3' };
+    case 'auto':
+    case undefined:
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+function getOpenRouterImageModalities(modelId: string): Array<'image' | 'text'> {
+  return /^(google|openai)\//i.test(modelId) ? ['image', 'text'] : ['image'];
+}
+
+function readOpenRouterImageUrl(image: OpenRouterImageItem): string | undefined {
+  return image.imageUrl?.url ?? image.image_url?.url ?? image.url;
+}
+
+function toImageData(url: string, responseFormat: 'url' | 'b64_json', revisedPrompt: string): ImageData {
+  const image: ImageData = responseFormat === 'url' ? { url } : dataUrlToB64(url);
+  if (revisedPrompt) image.revised_prompt = revisedPrompt;
+  return image;
+}
+
+function dataUrlToB64(url: string): ImageData {
+  const match = /^data:[^;]+;base64,(.+)$/i.exec(url);
+  return match ? { b64_json: match[1] } : { url };
 }
 
 /**

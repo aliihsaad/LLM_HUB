@@ -57,6 +57,7 @@ export function RealtimeSessionPanel({ apiKey, model, instructions, voice, varia
   const canSend = isConnected && wsRef.current?.readyState === WebSocket.OPEN
   const voiceActive = status === 'recording' || isSpeaking
   const voiceLabel = isSpeaking ? 'Talking' : status === 'recording' ? 'Listening' : isConnected ? 'Ready' : status
+  const audioWireFormat = session?.model === 'gemini-3.1-flash-live-preview' ? 'audio' : 'mediaChunks'
 
   useEffect(() => {
     return () => {
@@ -193,7 +194,7 @@ export function RealtimeSessionPanel({ apiKey, model, instructions, voice, varia
         if (!socket || socket.readyState !== WebSocket.OPEN) return
         const input = event.inputBuffer.getChannelData(0)
         const data = float32ToPcm16Base64(input, context.sampleRate, 16000)
-        socket.send(JSON.stringify(createRealtimeAudioInputMessage(data, 16000, 'mediaChunks')))
+        socket.send(JSON.stringify(createRealtimeAudioInputMessage(data, 16000, audioWireFormat)))
       }
 
       source.connect(processor)
@@ -348,7 +349,10 @@ export function RealtimeSessionPanel({ apiKey, model, instructions, voice, varia
                     isSpeaking ? 'bg-emerald-500' : status === 'recording' ? 'bg-sky-500' : 'bg-muted-foreground/35',
                   )}
                   style={{
-                    animation: voiceActive ? 'realtime-voice-wave 900ms ease-in-out infinite' : undefined,
+                    animationName: voiceActive ? 'realtime-voice-wave' : undefined,
+                    animationDuration: voiceActive ? '900ms' : undefined,
+                    animationTimingFunction: voiceActive ? 'ease-in-out' : undefined,
+                    animationIterationCount: voiceActive ? 'infinite' : undefined,
                     animationDelay: `${(index % 8) * 80}ms`,
                     transform: voiceActive ? undefined : `scaleY(${0.22 + (index % 5) * 0.07})`,
                   }}

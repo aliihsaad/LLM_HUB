@@ -290,7 +290,7 @@ describe('Fallback API', () => {
     const { status, body } = await request(app, 'GET', '/api/fallback/token-usage');
 
     expect(status).toBe(200);
-    const googleModel = body.models.find((m: any) => m.platform === 'google');
+    const googleModel = body.models.find((m: any) => m.platform === 'google' && m.baseBudget > 0);
     expect(googleModel).toMatchObject({
       platform: 'google',
       keyCount: 2,
@@ -299,6 +299,17 @@ describe('Fallback API', () => {
     expect(googleModel.effectiveBudget).toBe(googleModel.baseBudget * 2);
     expect(googleModel.budget).toBe(googleModel.effectiveBudget);
     expect(body.totalBudget).toBeGreaterThanOrEqual(googleModel.effectiveBudget);
+
+    const realtimeModel = body.models.find((m: any) =>
+      m.platform === 'google' && m.capabilities?.includes('realtime_audio')
+    );
+    expect(realtimeModel).toMatchObject({
+      platform: 'google',
+      monthlyTokenBudget: 'audio',
+      keyCount: 2,
+      baseBudget: 0,
+      effectiveBudget: 0,
+    });
   });
 
   it('GET /api/fallback/token-usage includes healthy credit-based provider models', async () => {
