@@ -31,6 +31,7 @@ import {
   type ClassifiedProviderError,
 } from '../services/provider-errors.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
+import { hasProvider } from '../providers/index.js';
 
 export const proxyRouter = Router();
 export const geminiProxyRouter = Router();
@@ -126,20 +127,78 @@ function setStickyModel(messages: ChatMessage[], modelDbId: number) {
   }
 }
 
-// OpenAI-compatible /models endpoint (used by Hermes for metadata)
+interface UnifiedModelListRow {
+  id: number;
+  platform: string;
+  model_id: string;
+  display_name: string;
+  context_window: number | null;
+  intelligence_rank: number;
+  capabilities: string | null;
+  key_count: number;
+}
+
+// OpenAI-compatible /models endpoint (used by external clients for metadata).
+// Extra fields are intentionally additive so OpenAI-style clients can ignore
+// them, while capability-aware clients can avoid sending chat requests to
+// realtime/audio/image-only models.
 proxyRouter.get('/models', (_req: Request, res: Response) => {
   const db = getDb();
-  const models = db.prepare('SELECT platform, model_id, display_name, context_window FROM models WHERE enabled = 1 ORDER BY intelligence_rank').all() as any[];
+  const models = db.prepare(`
+    SELECT
+      m.id,
+      m.platform,
+      m.model_id,
+      m.display_name,
+      m.context_window,
+      m.intelligence_rank,
+      COUNT(DISTINCT ak.id) AS key_count,
+      GROUP_CONCAT(DISTINCT mc.capability) AS capabilities
+    FROM models m
+    JOIN api_keys ak
+      ON ak.platform = m.platform
+      AND ak.enabled = 1
+      AND ak.status != 'invalid'
+    LEFT JOIN model_capabilities mc
+      ON mc.model_db_id = m.id
+      AND mc.enabled = 1
+    LEFT JOIN model_runtime_health rh
+      ON rh.model_db_id = m.id
+    WHERE m.enabled = 1
+      AND (
+        rh.model_db_id IS NULL
+        OR NOT (
+          rh.status = 'unavailable'
+          AND rh.last_error_category = 'zero_quota'
+        )
+      )
+      AND (
+        rh.blocked_until IS NULL
+        OR rh.blocked_until <= datetime('now')
+      )
+    GROUP BY m.id
+    ORDER BY m.intelligence_rank ASC, m.model_id ASC
+  `).all() as UnifiedModelListRow[];
+
   res.json({
     object: 'list',
-    data: models.map(m => ({
-      id: m.model_id,
-      object: 'model',
-      created: 0,
-      owned_by: m.platform,
-      name: m.display_name,
-      context_window: m.context_window,
-    })),
+    data: models.filter(m => hasProvider(m.platform as any)).map(m => {
+      const capabilities = m.capabilities
+        ? m.capabilities.split(',').filter(Boolean)
+        : ['chat'];
+
+      return {
+        id: m.model_id,
+        object: 'model',
+        created: 0,
+        owned_by: m.platform,
+        name: m.display_name,
+        context_window: m.context_window,
+        capabilities,
+        available: true,
+        key_count: m.key_count,
+      };
+    }),
   });
 });
 

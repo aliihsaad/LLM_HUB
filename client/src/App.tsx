@@ -106,25 +106,34 @@ const NAV_ITEMS: NavItem[] = [
   },
 ]
 
+const NAV_GROUPS = [
+  {
+    label: 'Operate',
+    items: NAV_ITEMS.filter(item => ['/home', '/playground', '/fallback'].includes(item.to)),
+  },
+  {
+    label: 'Inventory',
+    items: NAV_ITEMS.filter(item => ['/keys', '/model-status', '/capabilities'].includes(item.to)),
+  },
+  {
+    label: 'Observe',
+    items: NAV_ITEMS.filter(item => ['/logs', '/analytics', '/integrations', '/settings'].includes(item.to)),
+  },
+]
+
 function pageTitle(pathname: string) {
   const item = NAV_ITEMS.find(item => pathname === item.to || pathname.startsWith(`${item.to}/`))
-  return item?.label ?? 'LLM-Hub Pro Max'
+  return item?.label ?? 'LLM Hub'
 }
 
 function Brand() {
   return (
-    <div className="flex w-full min-w-0 items-center gap-2">
+    <div className="flex w-full min-w-0 items-center">
       <img
         src={llmHubLogo}
-        alt=""
-        className="h-20 min-w-0 w-full max-w-[10.75rem] shrink-0 object-contain"
-        aria-hidden="true"
+        alt="LLM Hub"
+        className="h-20 min-w-0 w-full max-w-[15rem] shrink-0 object-contain object-left"
       />
-      <span
-        className="ml-2 inline-flex h-5 min-w-fit shrink-0 items-center rounded-full border border-primary/40 bg-gradient-to-br from-primary/95 to-primary/65 px-2.5 py-0.5 text-[8px] font-semibold tracking-[0.24em] text-primary-foreground shadow-[0_10px_20px_rgba(59,130,246,0.25)] whitespace-nowrap"
-      >
-        PRO MAX
-      </span>
     </div>
   )
 }
@@ -146,12 +155,12 @@ function SidebarItem({
           cn(
             'group relative flex w-full min-w-0 items-center gap-3 rounded-xl border p-2.5 text-left transition-all',
             isActive
-              ? 'border-primary/35 bg-gradient-to-r from-primary/22 to-transparent text-foreground shadow-sm shadow-primary/20'
-            : 'border-border/60 bg-card/40 text-muted-foreground hover:border-primary/35 hover:bg-muted/60 hover:text-foreground',
+              ? 'border-primary/45 bg-primary/12 text-foreground'
+              : 'border-transparent bg-transparent text-muted-foreground hover:border-border hover:bg-muted/45 hover:text-foreground',
           )
         }
       >
-        <span className="size-9 shrink-0 rounded-lg border border-primary/25 bg-background/70 text-primary flex items-center justify-center transition-colors group-hover:border-primary/45 group-hover:bg-primary/10">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background/55 text-primary transition-colors group-hover:border-primary/45">
           <Icon className="size-4" />
         </span>
         <span className="min-w-0 flex-1">
@@ -159,7 +168,6 @@ function SidebarItem({
           <span className="block text-[11px] text-muted-foreground/80 truncate">{item.description}</span>
         </span>
         <ArrowRight className="size-3.5 opacity-45 transition-transform group-hover:translate-x-1" />
-        <span className="pointer-events-none absolute inset-x-2 bottom-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
       </NavLink>
     </li>
   )
@@ -201,9 +209,7 @@ function AppShell() {
   const navigate = useNavigate()
 
   return (
-    <div className="relative flex min-h-screen bg-background">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top,_var(--primary)/18,_transparent_42%),radial-gradient(circle_at_right_bottom,_var(--sky-500,theme(colors.sky.500))/12,_transparent_38%)] opacity-85" />
-
+    <div className="relative flex min-h-dvh bg-background">
       <div
         className={cn(
           'fixed inset-0 z-40 bg-black/50 transition-opacity md:hidden',
@@ -214,13 +220,13 @@ function AppShell() {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-72 min-h-0 shrink-0 flex-col border-r border-white/10 bg-gradient-to-b from-primary/18 via-primary/8 to-sidebar px-4 py-5 shadow-xl shadow-slate-950/6 transition-transform md:static md:translate-x-0 md:border-t md:border-l-0 md:border-b-0 dark:border-sidebar-border/80 dark:from-sky-500/12 dark:via-sky-500/5 dark:to-sidebar',
+          'fixed inset-y-0 left-0 z-50 flex w-72 min-h-0 shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-3 py-4 shadow-2xl shadow-black/30 transition-transform md:static md:translate-x-0 md:shadow-none',
           'overflow-x-hidden',
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
         <div className="flex h-full min-h-0 flex-col">
-          <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="mb-4 flex items-center justify-between border-b border-sidebar-border pb-3">
             <Brand />
             <Button
               variant="ghost"
@@ -233,29 +239,37 @@ function AppShell() {
             </Button>
           </div>
 
-          <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">Navigation</p>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <ul className="min-h-0 w-full grid gap-2 overflow-y-auto overflow-x-hidden pr-1 text-sm">
-              {NAV_ITEMS.map(item => (
-                <SidebarItem
-                  key={item.to}
-                  item={item}
-                  onNavigate={() => setMobileMenuOpen(false)}
-                />
+            <div className="min-h-0 w-full space-y-4 overflow-y-auto overflow-x-hidden pr-1 text-sm">
+              {NAV_GROUPS.map(group => (
+                <nav key={group.label} aria-label={group.label}>
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    {group.label}
+                  </p>
+                  <ul className="grid gap-1">
+                    {group.items.map(item => (
+                      <SidebarItem
+                        key={item.to}
+                        item={item}
+                        onNavigate={() => setMobileMenuOpen(false)}
+                      />
+                    ))}
+                  </ul>
+                </nav>
               ))}
-            </ul>
+            </div>
           </div>
 
-          <div className="shrink-0 pt-4 space-y-2">
+          <div className="shrink-0 space-y-2 border-t border-sidebar-border pt-3">
             <Link
               to="/health"
-              className="group/security-note mb-3 flex items-center gap-2 rounded-lg border border-dashed border-primary/20 bg-primary/5 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-primary/10"
+              className="group/security-note flex items-center gap-2 rounded-md border border-border bg-background/35 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/8"
               onClick={() => setMobileMenuOpen(false)}
             >
               <ShieldCheck className="size-4" />
               Security note
             </Link>
-            <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="rounded-md border border-border bg-background/35 px-3 py-2 text-[11px] text-muted-foreground">
               <p className="font-semibold text-foreground">Session tuned for proxy operations</p>
               <p className="mt-1">Live telemetry, fallback tuning, and provider key control in one place.</p>
             </div>
@@ -264,8 +278,8 @@ function AppShell() {
       </aside>
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 border-b bg-background/90 backdrop-blur">
-        <div className="flex w-full items-center gap-3 px-2 py-3 sm:px-3 md:px-4 lg:px-5">
+        <header className="sticky top-0 z-30 border-b border-border bg-background/92 backdrop-blur">
+        <div className="flex h-14 w-full items-center gap-3 px-3 sm:px-4 lg:px-6">
             <Button
               variant="ghost"
               size="icon-sm"
@@ -294,22 +308,24 @@ function AppShell() {
           </div>
         </header>
 
-        <main className="relative flex min-w-0 flex-1 px-2 py-6 sm:px-3 md:px-4 lg:px-5 xl:px-6">
-          <Routes>
-            <Route path="/" element={<Navigate to="/home" replace />} />
-            <Route path="/home" element={<DashboardHomePage />} />
-            <Route path="/playground" element={<PlaygroundPage />} />
-            <Route path="/integrations" element={<IntegrationsPage />} />
-            <Route path="/keys" element={<KeysPage />} />
-            <Route path="/model-status" element={<ModelStatusPage />} />
-            <Route path="/fallback" element={<FallbackPage />} />
-            <Route path="/capabilities" element={<CapabilitiesPage />} />
-            <Route path="/logs" element={<LogsPage />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/test" element={<Navigate to="/playground" replace />} />
-            <Route path="/health" element={<Navigate to="/keys" replace />} />
-          </Routes>
+        <main className="relative flex min-w-0 flex-1 px-3 py-5 sm:px-4 lg:px-6 xl:px-7">
+          <div className="w-full min-w-0 max-w-[1720px]">
+            <Routes>
+              <Route path="/" element={<Navigate to="/home" replace />} />
+              <Route path="/home" element={<DashboardHomePage />} />
+              <Route path="/playground" element={<PlaygroundPage />} />
+              <Route path="/integrations" element={<IntegrationsPage />} />
+              <Route path="/keys" element={<KeysPage />} />
+              <Route path="/model-status" element={<ModelStatusPage />} />
+              <Route path="/fallback" element={<FallbackPage />} />
+              <Route path="/capabilities" element={<CapabilitiesPage />} />
+              <Route path="/logs" element={<LogsPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/test" element={<Navigate to="/playground" replace />} />
+              <Route path="/health" element={<Navigate to="/keys" replace />} />
+            </Routes>
+          </div>
         </main>
       </div>
     </div>

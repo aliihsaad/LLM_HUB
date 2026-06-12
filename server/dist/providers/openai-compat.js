@@ -134,6 +134,34 @@ export class OpenAICompatProvider extends BaseProvider {
         data._routed_via = { platform: this.platform, model: modelId };
         return data;
     }
+    async createImage(apiKey, request, modelId) {
+        if (this.platform !== 'openrouter')
+            return super.createImage(apiKey, request, modelId);
+        return this.createOpenRouterImage(apiKey, [{ role: 'user', content: request.prompt }], modelId, request, 'OpenRouter image generation returned no image data');
+    }
+    async editImage(apiKey, request, modelId) {
+        if (this.platform !== 'openrouter')
+            return super.editImage(apiKey, request, modelId);
+        const content = [
+            { type: 'text', text: request.prompt },
+            ...request.images.map(imageFileToOpenRouterPart),
+        ];
+        if (request.mask) {
+            content.push({ type: 'text', text: 'Use the provided mask as the editable region.' }, imageFileToOpenRouterPart(request.mask));
+        }
+        return this.createOpenRouterImage(apiKey, [{ role: 'user', content }], modelId, request, 'OpenRouter image edit returned no image data');
+    }
+    async createImageVariation(apiKey, request, modelId) {
+        if (this.platform !== 'openrouter')
+            return super.createImageVariation(apiKey, request, modelId);
+        return this.createOpenRouterImage(apiKey, [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: 'Create a variation of this image while preserving its main subject and composition.' },
+                    imageFileToOpenRouterPart(request.image),
+                ],
+            }], modelId, request, 'OpenRouter image variation returned no image data');
+    }
     async transcribeAudio(apiKey, request, modelId) {
         return this.forwardAudioText(apiKey, request, modelId, 'transcriptions');
     }
@@ -181,6 +209,44 @@ export class OpenAICompatProvider extends BaseProvider {
             _routed_via: { platform: this.platform, model: modelId },
         };
     }
+    async createOpenRouterImage(apiKey, messages, modelId, request, emptyMessage) {
+        const imageConfig = toOpenRouterImageConfig(request.size);
+        const modalities = getOpenRouterImageModalities(modelId);
+        const res = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                ...this.extraHeaders,
+            },
+            body: JSON.stringify({
+                model: modelId,
+                messages,
+                modalities,
+                stream: false,
+                ...(imageConfig ? { image_config: imageConfig } : {}),
+            }),
+        }, 120000);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(`${this.name} API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+        }
+        const data = await res.json();
+        throwIfOpenAIErrorBody(this.name, data);
+        const message = data.choices?.[0]?.message;
+        const revisedPrompt = typeof message?.content === 'string' ? message.content.trim() : '';
+        const images = (message?.images ?? [])
+            .map(readOpenRouterImageUrl)
+            .filter((url) => Boolean(url))
+            .map(url => toImageData(url, request.response_format ?? 'b64_json', revisedPrompt));
+        if (images.length === 0)
+            throw new Error(emptyMessage);
+        return {
+            created: Math.floor(Date.now() / 1000),
+            data: images,
+            _routed_via: { platform: this.platform, model: modelId },
+        };
+    }
 }
 function throwIfOpenAIErrorBody(providerName, data) {
     if (!data || typeof data !== 'object' || !('error' in data))
@@ -224,6 +290,46 @@ function buildAudioFormData(request, modelId) {
         }
     }
     return form;
+}
+function imageFileToOpenRouterPart(file) {
+    const base64 = Buffer.from(file.data).toString('base64');
+    return {
+        type: 'image_url',
+        image_url: {
+            url: `data:${file.contentType};base64,${base64}`,
+        },
+    };
+}
+function toOpenRouterImageConfig(size) {
+    switch (size) {
+        case '1024x1024':
+            return { aspect_ratio: '1:1' };
+        case '1536x1024':
+            return { aspect_ratio: '3:2' };
+        case '1024x1536':
+            return { aspect_ratio: '2:3' };
+        case 'auto':
+        case undefined:
+            return undefined;
+        default:
+            return undefined;
+    }
+}
+function getOpenRouterImageModalities(modelId) {
+    return /^(google|openai)\//i.test(modelId) ? ['image', 'text'] : ['image'];
+}
+function readOpenRouterImageUrl(image) {
+    return image.imageUrl?.url ?? image.image_url?.url ?? image.url;
+}
+function toImageData(url, responseFormat, revisedPrompt) {
+    const image = responseFormat === 'url' ? { url } : dataUrlToB64(url);
+    if (revisedPrompt)
+        image.revised_prompt = revisedPrompt;
+    return image;
+}
+function dataUrlToB64(url) {
+    const match = /^data:[^;]+;base64,(.+)$/i.exec(url);
+    return match ? { b64_json: match[1] } : { url };
 }
 /**
  * Some providers (Z.ai glm-4.5-flash, Cloudflare DeepSeek-R1-distill, others)

@@ -35,6 +35,17 @@ interface FallbackEntry {
   runtimeStatus?: 'healthy' | 'degraded' | 'unavailable'
 }
 
+interface CatalogModelEntry {
+  modelDbId: number
+  id?: number
+  enabled: boolean
+  platform: string
+  modelId: string
+  displayName: string
+  keyCount: number
+  capabilities?: string[]
+}
+
 interface PlaygroundResult {
   id: number
   mode: PlaygroundCapabilityMode
@@ -193,6 +204,12 @@ export default function PlaygroundPage() {
   })
   const capabilityData = capabilityQuery.data
 
+  const modelCatalogQuery = useQuery<CatalogModelEntry[]>({
+    queryKey: ['models', 'catalog'],
+    queryFn: () => apiFetch('/api/models'),
+  })
+  const modelCatalog = modelCatalogQuery.data ?? []
+
   const sweepQuery = useQuery<ModelSweepJob>({
     queryKey: ['model-sweep', sweepId],
     enabled: Boolean(sweepId),
@@ -202,6 +219,19 @@ export default function PlaygroundPage() {
   const sweepJob = sweepQuery.data
 
   const availableModels = fallbackEntries.filter(e => e.keyCount > 0 && e.enabled && e.runtimeStatus !== 'unavailable')
+  const realtimeModels = useMemo(
+    () => modelCatalog
+      .filter(model => model.enabled && model.keyCount > 0 && model.capabilities?.includes('realtime_audio'))
+      .map(model => ({
+        modelDbId: model.modelDbId ?? model.id ?? 0,
+        platform: model.platform,
+        modelId: model.modelId,
+        displayName: model.displayName,
+        keyCount: model.keyCount,
+        capabilities: model.capabilities,
+      })),
+    [modelCatalog],
+  )
   const definition = getPlaygroundMode(mode)
   const configuredProviders = getConfiguredProviderCount(capabilityData, mode)
   const supportedModels = getSupportedModelCount(capabilityData, mode)
@@ -215,6 +245,9 @@ export default function PlaygroundPage() {
   const activeChatModelLabel = selectedModel === 'auto'
     ? 'Auto (fallback chain)'
     : availableModels.find(m => m.modelId === selectedModel)?.displayName ?? selectedModel
+  const activeRealtimeModelLabel = modelOverride.trim()
+    ? realtimeModels.find(model => model.modelId === modelOverride.trim())?.displayName ?? modelOverride.trim()
+    : 'Auto (verified realtime default)'
   const endpoint = isGeminiMode(mode) ? geminiEndpointFor(mode, modelOverride) : definition.endpoint
 
   const activeModel = useMemo(() => {
@@ -598,40 +631,68 @@ function fileToDataUrl(file: File): Promise<string> {
         }
       />
 
-      <div className="mb-4 inline-flex w-fit items-center rounded-xl border border-border/65 bg-card/80 p-1">
-        <button
-          type="button"
-          onClick={() => setSurface('chat')}
-          className={cn(
-            'inline-flex h-8 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-all',
-            surface === 'chat' ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/30' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-          )}
-        >
-          <MessageSquare className="size-4" />
-          Chat
-        </button>
-        <button
-          type="button"
-          onClick={() => setSurface('test-lab')}
-          className={cn(
-            'inline-flex h-8 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-all',
-            surface === 'test-lab' ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/30' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-          )}
-        >
-          <FlaskConical className="size-4" />
-          Test Lab
-        </button>
+      <div className="mb-4 grid gap-3 rounded-lg border border-border bg-card p-3 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center">
+        <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-background/35 p-1">
+          <button
+            type="button"
+            onClick={() => setSurface('chat')}
+            className={cn(
+              'inline-flex h-9 items-center justify-center gap-2 rounded-sm px-4 text-sm font-medium transition-colors',
+              surface === 'chat' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+            )}
+          >
+            <MessageSquare className="size-4" />
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => setSurface('test-lab')}
+            className={cn(
+              'inline-flex h-9 items-center justify-center gap-2 rounded-sm px-4 text-sm font-medium transition-colors',
+              surface === 'test-lab' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+            )}
+          >
+            <FlaskConical className="size-4" />
+            Test Lab
+          </button>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="rounded-md border border-border bg-background/35 px-3 py-2">
+            <p className="text-muted-foreground">Chat routes</p>
+            <p className="mt-1 font-semibold tabular-nums text-foreground">{availableModels.length}</p>
+          </div>
+          <div className="rounded-md border border-border bg-background/35 px-3 py-2">
+            <p className="text-muted-foreground">Realtime</p>
+            <p className="mt-1 font-semibold tabular-nums text-foreground">{realtimeModels.length}</p>
+          </div>
+          <div className="rounded-md border border-border bg-background/35 px-3 py-2">
+            <p className="text-muted-foreground">Capability</p>
+            <p className="mt-1 truncate font-semibold text-foreground">{definition.label}</p>
+          </div>
+        </div>
       </div>
 
       {surface === 'chat' ? (
-        <PlaygroundChatPanel
-          apiKey={keyData?.apiKey}
-          models={availableModels}
-          capabilityData={capabilityData}
-        />
+        <div className="rounded-lg border border-border bg-card p-3">
+          <PlaygroundChatPanel
+            apiKey={keyData?.apiKey}
+            models={availableModels}
+            realtimeModels={realtimeModels}
+            capabilityData={capabilityData}
+          />
+        </div>
       ) : (
-        <>
-          <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
+        <div className="grid min-h-0 gap-4 xl:grid-cols-[16rem_minmax(0,1fr)]">
+          <aside className="min-w-0 xl:sticky xl:top-20 xl:self-start">
+            <div className="rounded-lg border border-border bg-card p-3">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold">Capabilities</h2>
+                  <p className="text-xs text-muted-foreground">Pick an endpoint surface.</p>
+                </div>
+                <Badge variant="outline">{PLAYGROUND_MODES.length}</Badge>
+              </div>
+          <div className="grid gap-1">
             {PLAYGROUND_MODES.map(item => {
               const status = modeStatus(capabilityData, item.id)
               const active = item.id === mode
@@ -643,8 +704,8 @@ function fileToDataUrl(file: File): Promise<string> {
                   type="button"
                   onClick={() => setMode(item.id)}
                   className={cn(
-                    'rounded-xl border border-border/70 px-3 py-2 text-left transition-all hover:border-primary/30 hover:bg-muted/50',
-                    active ? 'border-foreground bg-muted/70 shadow-sm' : 'bg-card',
+                    'rounded-md border px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-muted/45',
+                    active ? 'border-primary/55 bg-primary/12' : 'border-transparent bg-transparent',
                   )}
                 >
                   <div className="flex items-center gap-2">
@@ -660,10 +721,14 @@ function fileToDataUrl(file: File): Promise<string> {
                 </button>
               )
             })}
-          </div>
+              </div>
+            </div>
+          </aside>
+
+          <section className="min-w-0">
 
       {sweepJob && (
-        <Card className="mb-4 border-border/70 bg-card/95 shadow-sm">
+        <Card className="mb-4">
           <CardContent className="space-y-0 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -719,8 +784,8 @@ function fileToDataUrl(file: File): Promise<string> {
         </Card>
       )}
 
-      <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <Card className="min-w-0 border-border/70 bg-card/95 shadow-sm">
+      <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-[24rem_minmax(0,1fr)]">
+        <Card className="min-w-0">
           <CardContent className="space-y-0 p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
@@ -734,7 +799,30 @@ function fileToDataUrl(file: File): Promise<string> {
           </div>
 
           <div className="space-y-4">
-            {mode !== 'chat' && (
+            {mode === 'realtime' ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Realtime model</Label>
+                <Select
+                  value={modelOverride.trim() || 'auto'}
+                  onValueChange={(value) => setModelOverride(value === 'auto' ? '' : value ?? '')}
+                >
+                  <SelectTrigger className="w-full min-w-0">
+                    <span className="truncate">{activeRealtimeModelLabel}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto (verified realtime default)</SelectItem>
+                    {realtimeModels.map(model => (
+                      <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate">{model.displayName}</span>
+                          <span className="text-xs text-muted-foreground">{model.platform}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : mode !== 'chat' && (
               <div className="space-y-1.5">
                 <Label className="text-xs">{isGeminiMode(mode) ? 'Gemini model path' : 'Model override'}</Label>
                 <Input
@@ -872,7 +960,7 @@ function fileToDataUrl(file: File): Promise<string> {
         </Card>
 
         {mode === 'realtime' ? (
-          <Card className="flex min-h-[520px] min-w-0 flex-col overflow-hidden border-border/70 bg-card/95 shadow-sm">
+          <Card className="flex min-h-[520px] min-w-0 flex-col overflow-hidden">
             <RealtimeSessionPanel
               apiKey={keyData?.apiKey}
               model={activeModel}
@@ -881,7 +969,7 @@ function fileToDataUrl(file: File): Promise<string> {
             />
           </Card>
         ) : (
-          <Card className="flex min-h-[520px] min-w-0 flex-col overflow-hidden border-border/70 bg-card/95 shadow-sm">
+          <Card className="flex min-h-[520px] min-w-0 flex-col overflow-hidden">
             <div className="border-b px-4 py-3">
               <h2 className="text-sm font-medium">Result</h2>
             </div>
@@ -900,12 +988,12 @@ function fileToDataUrl(file: File): Promise<string> {
                     {lastResult.meta?.latency != null && <span className="text-xs text-muted-foreground tabular-nums">{lastResult.meta.latency} ms</span>}
                   </div>
 
-                  <pre className="max-h-[220px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/50 bg-background/70 p-3 text-xs leading-relaxed">
+                  <pre className="max-h-[220px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background/55 p-3 text-xs leading-relaxed">
                     {lastResult.content}
                   </pre>
 
                   {lastResult.imageSrc && (
-                    <div className="overflow-hidden rounded-xl border border-border/50 bg-background/70">
+                    <div className="overflow-hidden rounded-md border border-border bg-background/55">
                       <img src={lastResult.imageSrc} alt="Generated result" className="max-h-[420px] w-full object-contain" />
                     </div>
                   )}
@@ -915,7 +1003,7 @@ function fileToDataUrl(file: File): Promise<string> {
                   )}
 
                   {lastResult.raw != null && (
-                    <details className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-background/60">
+                    <details className="min-w-0 overflow-hidden rounded-md border border-border bg-background/55">
                       <summary className="cursor-pointer px-3 py-2 text-xs font-medium">Raw JSON</summary>
                       <pre className="max-h-[320px] max-w-full overflow-auto whitespace-pre-wrap break-words p-3 text-xs font-mono">{formatJson(lastResult.raw)}</pre>
                     </details>
@@ -929,7 +1017,7 @@ function fileToDataUrl(file: File): Promise<string> {
                           key={result.id}
                           type="button"
                           onClick={() => setResults(current => [result, ...current.filter(item => item.id !== result.id)])}
-                          className="block w-full rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-xs hover:bg-muted/50"
+                          className="block w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-left text-xs hover:bg-muted/50"
                         >
                           <span className="font-medium">{getPlaygroundMode(result.mode).label}</span>
                           <span className="ml-2 text-muted-foreground">{result.title}</span>
@@ -943,7 +1031,8 @@ function fileToDataUrl(file: File): Promise<string> {
           </Card>
         )}
       </div>
-        </>
+          </section>
+        </div>
       )}
     </div>
   )

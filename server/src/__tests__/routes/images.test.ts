@@ -109,7 +109,7 @@ describe('Images proxy route', () => {
     });
 
     expect(status).toBe(200);
-    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.1-flash-image-preview');
+    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.1-flash-image');
     expect(providerBody.contents).toEqual([{ parts: [{ text: 'A tiny red dot on a white background' }] }]);
     expect(providerBody.generationConfig.responseModalities).toEqual(['TEXT', 'IMAGE']);
     expect(body.data[0]).toEqual({
@@ -170,7 +170,7 @@ describe('Images proxy route', () => {
     const { status, body, headers } = await requestMultipart(app, '/v1/images/edits', form);
 
     expect(status).toBe(200);
-    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.1-flash-image-preview');
+    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.1-flash-image');
     expect(providerBody.contents[0].parts[0]).toEqual({ text: 'Make the background transparent' });
     expect(providerBody.contents[0].parts[1]).toEqual({
       inlineData: { mimeType: 'image/png', data: Buffer.from('fake-png').toString('base64') },
@@ -265,7 +265,7 @@ describe('Images proxy route', () => {
     const { status, body, headers } = await requestMultipart(app, '/v1/images/variations', form);
 
     expect(status).toBe(200);
-    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.1-flash-image-preview');
+    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.1-flash-image');
     expect(providerBody.contents[0].parts[0].text).toContain('Create a variation');
     expect(providerBody.contents[0].parts[1]).toEqual({
       inlineData: { mimeType: 'image/png', data: Buffer.from('fake-png').toString('base64') },

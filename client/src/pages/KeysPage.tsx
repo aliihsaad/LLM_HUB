@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PageHeader } from '@/components/page-header'
 import { ProviderHelperLinks } from '@/components/provider-helper-links'
 import { Badge } from '@/components/ui/badge'
-import { Info } from 'lucide-react'
+import { Activity, Info, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import type { ApiKey, Platform, ProviderMetadata, ProvidersResponse } from '../../../shared/types'
 
 const FALLBACK_PROVIDERS: ProviderMetadata[] = [
@@ -141,8 +141,6 @@ export default function KeysPage() {
   const keyByPlatform = new Map<string, HealthPlatform | undefined>()
   for (const k of healthData?.platforms ?? []) keyByPlatform.set(k.platform, k)
 
-  const addState = isLoading && keys.length === 0 ? 'initial' : 'ready'
-
   const healthyCount = keyByPlatform.size
   const totalKeys = keys.length
   const platformWithKeys = grouped.length
@@ -156,7 +154,7 @@ export default function KeysPage() {
   }
 
   return (
-    <div>
+    <div className="w-full">
       <PageHeader
         title="Keys"
         description="Provider credentials, health checks, and key rotation."
@@ -169,43 +167,43 @@ export default function KeysPage() {
         }
       />
 
-      <div className="space-y-8">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Card>
-            <CardContent className="px-3 py-3">
-              <p className="text-xs text-muted-foreground">Total keys</p>
+      <div className="grid gap-5 xl:grid-cols-[22rem_minmax(0,1fr)]">
+        <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-md border border-border bg-card px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Keys</p>
               <p className="mt-1 text-xl font-semibold tabular-nums">{totalKeys}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="px-3 py-3">
-              <p className="text-xs text-muted-foreground">Configured providers</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums">{platformWithKeys}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="px-3 py-3">
-              <p className="text-xs text-muted-foreground">Health coverage</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums">{healthyCount}</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Add a provider key</CardTitle>
-            <CardDescription>Add credentials by platform to unlock provider routing and failover.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-lg border bg-muted/25 px-3 py-2.5 text-xs text-muted-foreground">
-              <div className="flex items-start gap-2">
-                <Info className="mt-0.5 size-3.5 flex-shrink-0 text-foreground/70" aria-hidden="true" />
-                <p>
-                  For higher usable quota, add keys from separate provider accounts or projects. Keys from the same account may still share provider-side limits even if this proxy rotates and tracks them separately.
-                </p>
-              </div>
             </div>
-            <form onSubmit={handleSubmit} className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-md border border-border bg-card px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Providers</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">{platformWithKeys}</p>
+            </div>
+            <div className="rounded-md border border-border bg-card px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Health</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">{healthyCount}</p>
+            </div>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <span className="flex size-8 items-center justify-center rounded-md border border-border bg-background/45 text-primary">
+                  <Plus className="size-4" />
+                </span>
+                <div>
+                  <CardTitle>Add credential</CardTitle>
+                  <CardDescription>Unlock routing capacity by provider.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-md border border-border bg-background/35 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+                <div className="flex items-start gap-2">
+                  <Info className="mt-0.5 size-3.5 flex-shrink-0 text-foreground/70" aria-hidden="true" />
+                  <p>Use separate provider accounts or projects when possible; same-account keys may still share upstream quota.</p>
+                </div>
+              </div>
+              <form onSubmit={handleSubmit} className="space-y-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Platform</Label>
                 <Select value={platform} onValueChange={(v) => setPlatform(v as Platform)}>
@@ -233,7 +231,7 @@ export default function KeysPage() {
                   />
                 </div>
               )}
-              <div className="space-y-1.5 lg:col-span-2">
+              <div className="space-y-1.5">
                 <Label className="text-xs">{needsAccountId ? 'API token' : 'API key'}</Label>
                 <Input
                   type="password"
@@ -251,85 +249,114 @@ export default function KeysPage() {
                   placeholder="optional"
                 />
               </div>
-              <div className="flex items-end lg:justify-end">
-                <Button type="submit" size="sm" disabled={!platform || !apiKey || (needsAccountId && !accountId) || addKey.isPending}>
+              <Button type="submit" size="sm" className="w-full" disabled={!platform || !apiKey || (needsAccountId && !accountId) || addKey.isPending}>
+                <KeyRound className="size-3.5" />
                   {addKey.isPending ? 'Adding…' : 'Add key'}
-                </Button>
-              </div>
+              </Button>
               {addKey.isError && (
-                <p className="text-destructive text-xs col-span-full">{(addKey.error as Error).message}</p>
+                <p className="text-destructive text-xs">{(addKey.error as Error).message}</p>
               )}
             </form>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-3">
-          <Card>
-            <CardHeader>
-              <CardTitle>Configured providers</CardTitle>
-              <CardDescription>{keys.length === 0 ? 'No keys yet' : `${keys.length} total keys loaded`}</CardDescription>
-            </CardHeader>
+            </CardContent>
           </Card>
+        </aside>
+
+        <section className="min-w-0 space-y-3">
+          <div className="flex min-w-0 flex-col gap-1 border-b border-border pb-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Provider inventory</h2>
+              <p className="text-xs text-muted-foreground">{keys.length === 0 ? 'No keys yet' : `${keys.length} total keys loaded across ${platformWithKeys} providers`}</p>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-emerald-500" />healthy</span>
+              <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-amber-500" />limited</span>
+              <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-rose-500" />error</span>
+            </div>
+          </div>
 
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : keys.length === 0 ? (
             <Card>
-              <CardContent className="text-sm text-muted-foreground">
-                No provider keys yet. Add one above to start routing.
+              <CardContent className="flex min-h-[20rem] items-center justify-center text-center text-sm text-muted-foreground">
+                <div>
+                  <ShieldCheck className="mx-auto mb-3 size-8 text-muted-foreground/60" />
+                  No provider keys yet. Add one from the credential panel to start routing.
+                </div>
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-4">
+            <div className="grid gap-3">
               {grouped.map(group => {
                 const stats = keyByPlatform.get(group.platform)
                 const healthy = stats?.healthyKeys ?? 0
+                const problemCount = (stats?.rateLimitedKeys ?? 0) + (stats?.invalidKeys ?? 0) + (stats?.errorKeys ?? 0)
                 return (
                   <Card key={group.platform}>
                     <CardHeader>
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
+                      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="flex size-8 items-center justify-center rounded-md border border-border bg-background/45 text-primary">
+                              <Activity className="size-4" />
+                            </span>
                             <CardTitle className="text-sm">{group.displayName}</CardTitle>
                             <ProviderHelperLinks provider={group} className="mt-0.5" />
+                            <Badge variant={problemCount > 0 ? 'secondary' : 'outline'}>{problemCount > 0 ? `${problemCount} attention` : 'ready'}</Badge>
                           </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {healthy}/{group.keys.length} healthy · {group.keys.length} keys
+                          <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+                            {healthy}/{group.keys.length} healthy · {group.keys.length} keys · {stats?.unknownKeys ?? 0} unchecked
                           </p>
                         </div>
-                        <Badge variant={healthy === group.keys.length ? 'outline' : 'secondary'}>
-                          {addState === 'initial' ? 'Ready' : `${group.keys.length} key${group.keys.length === 1 ? '' : 's'}`}
-                        </Badge>
+                        <div className="grid min-w-[14rem] grid-cols-3 overflow-hidden rounded-md border border-border text-center text-xs tabular-nums">
+                          <div className="border-r border-border px-3 py-2">
+                            <p className="text-muted-foreground">Healthy</p>
+                            <p className="mt-1 font-semibold text-emerald-300">{healthy}</p>
+                          </div>
+                          <div className="border-r border-border px-3 py-2">
+                            <p className="text-muted-foreground">Limited</p>
+                            <p className="mt-1 font-semibold text-amber-300">{stats?.rateLimitedKeys ?? 0}</p>
+                          </div>
+                          <div className="px-3 py-2">
+                            <p className="text-muted-foreground">Invalid</p>
+                            <p className="mt-1 font-semibold text-rose-300">{(stats?.invalidKeys ?? 0) + (stats?.errorKeys ?? 0)}</p>
+                          </div>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="px-3 pb-3 pt-0">
-                      <div className="rounded-lg border divide-y overflow-hidden">
+                      <div className="overflow-hidden rounded-md border border-border">
                         {group.keys.map(k => {
                           const h = healthData?.keys?.find(item => item.id === k.id)
                           const status = h?.status ?? k.status
                           const lastChecked = h?.lastCheckedAt
                           return (
-                            <div key={k.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+                            <div key={k.id} className="grid gap-3 border-b border-border px-4 py-3 transition-colors last:border-b-0 hover:bg-muted/35 md:grid-cols-[auto_10rem_minmax(0,1fr)_auto_auto] md:items-center">
                               <span className={`size-1.5 rounded-full flex-shrink-0 ${statusDot[status] ?? statusDot.unknown}`} />
-                              <code className="text-xs font-mono flex-shrink-0">{k.maskedKey}</code>
-                              {k.label && <span className="text-xs text-muted-foreground">{k.label}</span>}
-                              <Badge variant="outline" className="h-5 text-[10px]">{statusLabel[status] ?? status}</Badge>
-                              {lastChecked && (
-                                <span className="text-[11px] text-muted-foreground tabular-nums ml-auto">
-                                  {new Date(lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              )}
+                              <code className="text-xs font-mono">{k.maskedKey}</code>
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant="outline" className="h-5 text-[10px]">{statusLabel[status] ?? status}</Badge>
+                                  {k.label && <span className="truncate text-xs text-muted-foreground">{k.label}</span>}
+                                </div>
+                                {lastChecked && (
+                                  <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+                                    checked {new Date(lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                )}
+                              </div>
                               <Button variant="outline" size="xs" onClick={() => checkKey.mutate(k.id)} disabled={checkKey.isPending}>
                                 Check
                               </Button>
                               <Button
                                 variant="outline"
-                                size="xs"
+                                size="icon-xs"
                                 className="text-muted-foreground hover:text-destructive"
                                 onClick={() => deleteKey.mutate(k.id)}
                                 disabled={deleteKey.isPending}
+                                aria-label="Remove key"
                               >
-                                Remove
+                                <Trash2 className="size-3.5" />
                               </Button>
                             </div>
                           )
@@ -341,7 +368,7 @@ export default function KeysPage() {
               })}
             </div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   )

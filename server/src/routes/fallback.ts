@@ -280,29 +280,25 @@ fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
   `).all() as { platform: string; count: number }[];
   const keyCountMap = new Map(keyCounts.map(k => [k.platform, k.count]));
 
-  // Get monthly budget per model, ordered by fallback priority
+  // Get monthly budget per configured model, ordered by fallback priority.
+  // The draggable fallback chain is chat-only, but this budget view should also
+  // include endpoint-specific models such as realtime audio and speech.
   const models = db.prepare(`
     SELECT m.id, m.platform, m.model_id, m.display_name, m.monthly_token_budget,
            fc.priority, COALESCE(rh.status, 'healthy') AS runtime_status,
-           rh.blocked_until
+           rh.blocked_until,
+           COALESCE((
+             SELECT GROUP_CONCAT(mc.capability)
+             FROM model_capabilities mc
+             WHERE mc.model_db_id = m.id AND mc.enabled = 1
+           ), '') AS capabilities
     FROM models m
     JOIN fallback_config fc ON fc.model_db_id = m.id
     LEFT JOIN model_runtime_health rh ON rh.model_db_id = m.id
-    LEFT JOIN model_capabilities mc
-      ON mc.model_db_id = m.id
-      AND mc.capability = 'chat'
-      AND mc.enabled = 1
     WHERE m.enabled = 1
       AND fc.enabled = 1
       AND COALESCE(rh.status, 'healthy') = 'healthy'
       AND rh.blocked_until IS NULL
-      AND (
-        mc.id IS NOT NULL
-        OR NOT EXISTS (
-          SELECT 1 FROM model_capabilities any_mc
-          WHERE any_mc.model_db_id = m.id
-        )
-      )
     ORDER BY fc.priority ASC
   `).all() as {
     id: number;
@@ -313,6 +309,7 @@ fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
     priority: number;
     runtime_status: string;
     blocked_until: string | null;
+    capabilities: string;
   }[];
 
   // Build per-model breakdown (only platforms with keys)
@@ -335,6 +332,7 @@ fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
         effectiveBudget,
         budget: effectiveBudget,
         runtimeStatus: m.runtime_status,
+        capabilities: m.capabilities ? m.capabilities.split(',').filter(Boolean) : [],
       };
     });
 

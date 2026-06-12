@@ -288,7 +288,7 @@ describe('Proxy model hardening', () => {
   });
 
   it('treats provider zero-quota errors as confirmation-required model quarantine', async () => {
-    const blockedModel = 'gemini-3.1-pro-preview';
+    const blockedModel = 'gemini-3.5-flash';
     const fallbackModel = 'llama-3.3-70b-versatile';
     enableOnlyFallback([
       { platform: 'google', modelId: blockedModel, priority: 1 },
@@ -311,8 +311,8 @@ describe('Proxy model hardening', () => {
             error: {
               message: [
                 'You exceeded your current quota, please check your plan and billing details.',
-                '* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-pro',
-                '* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-pro',
+                '* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.5-flash',
+                '* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.5-flash',
                 'Please retry in 33s.',
               ].join('\n'),
             },

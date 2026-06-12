@@ -37,11 +37,13 @@ interface PlaygroundChatModelOption {
   modelId: string
   displayName: string
   keyCount: number
+  capabilities?: string[]
 }
 
 interface PlaygroundChatPanelProps {
   apiKey?: string
   models: PlaygroundChatModelOption[]
+  realtimeModels?: PlaygroundChatModelOption[]
   capabilityData?: CapabilitiesResponse
 }
 
@@ -182,7 +184,7 @@ async function readJsonResponse(res: Response) {
   return res.json().catch(() => null)
 }
 
-export function PlaygroundChatPanel({ apiKey, models, capabilityData }: PlaygroundChatPanelProps) {
+export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capabilityData }: PlaygroundChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageItem[]>(loadMessages)
   const [action, setAction] = useState<PlaygroundCapabilityMode>('chat')
   const [selectedModel, setSelectedModel] = useState('auto')
@@ -203,9 +205,10 @@ export function PlaygroundChatPanel({ apiKey, models, capabilityData }: Playgrou
 
   const activeAction = CHAT_ACTIONS.find(item => item.id === action) ?? CHAT_ACTIONS[0]
   const activeDefinition = getPlaygroundMode(action)
+  const modelOptions = action === 'realtime' ? realtimeModels : models
   const activeModelLabel = selectedModel === 'auto'
     ? 'Auto (fallback chain)'
-    : models.find(model => model.modelId === selectedModel)?.displayName ?? selectedModel
+    : modelOptions.find(model => model.modelId === selectedModel)?.displayName ?? selectedModel
 
   const history = useMemo(() => {
     return messages
@@ -230,6 +233,13 @@ export function PlaygroundChatPanel({ apiKey, models, capabilityData }: Playgrou
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (selectedModel === 'auto') return
+    if (!modelOptions.some(model => model.modelId === selectedModel)) {
+      setSelectedModel('auto')
+    }
+  }, [action, modelOptions, selectedModel])
 
   async function runAction() {
     if (busy) return
@@ -577,8 +587,10 @@ export function PlaygroundChatPanel({ apiKey, models, capabilityData }: Playgrou
                 <span className="truncate">{activeModelLabel}</span>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">Auto (fallback chain)</SelectItem>
-                {models.map(model => (
+                <SelectItem value="auto">
+                  {action === 'realtime' ? 'Auto (verified realtime default)' : 'Auto (fallback chain)'}
+                </SelectItem>
+                {modelOptions.map(model => (
                   <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="truncate">{model.displayName}</span>

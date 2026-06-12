@@ -304,7 +304,7 @@ describe('GoogleProvider', () => {
         response_format: 'b64_json',
         size: '1024x1024',
       },
-      'gemini-3.1-flash-image-preview',
+      'gemini-3.1-flash-image',
     );
 
     expect(capturedBody.contents[0].parts[0].text).toBe('A clean product photo');
@@ -315,7 +315,7 @@ describe('GoogleProvider', () => {
       b64_json: 'image_base64',
       revised_prompt: 'Generated prompt',
     });
-    expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-3.1-flash-image-preview' });
+    expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-3.1-flash-image' });
   });
 
   it('should edit images with prompt and inline image data', async () => {
@@ -349,7 +349,7 @@ describe('GoogleProvider', () => {
         }],
         response_format: 'b64_json',
       },
-      'gemini-3.1-flash-image-preview',
+      'gemini-3.1-flash-image',
     );
 
     expect(capturedBody.contents[0].parts).toEqual([
@@ -362,7 +362,7 @@ describe('GoogleProvider', () => {
       b64_json: 'edited_base64',
       revised_prompt: 'Edited image',
     });
-    expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-3.1-flash-image-preview' });
+    expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-3.1-flash-image' });
   });
 
   it('should create image variations with a default variation prompt', async () => {
@@ -394,7 +394,7 @@ describe('GoogleProvider', () => {
         },
         response_format: 'b64_json',
       },
-      'gemini-3.1-flash-image-preview',
+      'gemini-3.1-flash-image',
     );
 
     expect(capturedBody.contents[0].parts[0].text).toContain('Create a variation');
@@ -402,7 +402,7 @@ describe('GoogleProvider', () => {
       inlineData: { mimeType: 'image/png', data: Buffer.from('source-image').toString('base64') },
     });
     expect(result.data[0]).toEqual({ b64_json: 'variation_base64' });
-    expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-3.1-flash-image-preview' });
+    expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-3.1-flash-image' });
   });
 
   it('should generate speech and return WAV audio bytes', async () => {

@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatCompletionResponse, ChatCompletionChunk, AudioTextResult, AudioTranscriptionRequest, AudioTranslationRequest, EmbeddingInput, EmbeddingOptions, EmbeddingResponse, Platform } from 'llmhub-shared/types.js';
+import type { ChatMessage, ChatCompletionResponse, ChatCompletionChunk, AudioTextResult, AudioTranscriptionRequest, AudioTranslationRequest, EmbeddingInput, EmbeddingOptions, EmbeddingResponse, ImageEditRequest, ImageGenerationRequest, ImagesResponse, ImageVariationRequest, Platform } from 'llmhub-shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 /**
  * Generic provider for platforms that use an OpenAI-compatible API.
@@ -25,9 +25,13 @@ export declare class OpenAICompatProvider extends BaseProvider {
     chatCompletion(apiKey: string, messages: ChatMessage[], modelId: string, options?: CompletionOptions): Promise<ChatCompletionResponse>;
     streamChatCompletion(apiKey: string, messages: ChatMessage[], modelId: string, options?: CompletionOptions): AsyncGenerator<ChatCompletionChunk>;
     createEmbedding(apiKey: string, input: EmbeddingInput, modelId: string, options?: EmbeddingOptions): Promise<EmbeddingResponse>;
+    createImage(apiKey: string, request: ImageGenerationRequest, modelId: string): Promise<ImagesResponse>;
+    editImage(apiKey: string, request: ImageEditRequest, modelId: string): Promise<ImagesResponse>;
+    createImageVariation(apiKey: string, request: ImageVariationRequest, modelId: string): Promise<ImagesResponse>;
     transcribeAudio(apiKey: string, request: AudioTranscriptionRequest, modelId: string): Promise<AudioTextResult>;
     translateAudio(apiKey: string, request: AudioTranslationRequest, modelId: string): Promise<AudioTextResult>;
     validateKey(apiKey: string): Promise<boolean>;
     private forwardAudioText;
+    private createOpenRouterImage;
 }
 //# sourceMappingURL=openai-compat.d.ts.map

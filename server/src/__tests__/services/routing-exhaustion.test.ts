@@ -28,6 +28,10 @@ describe('Routing Key Exhaustion', () => {
   beforeEach(() => {
     initDb(':memory:');
     const db = getDb();
+
+    db.prepare('DELETE FROM fallback_config').run();
+    db.prepare('DELETE FROM model_capabilities').run();
+    db.prepare('DELETE FROM models').run();
     
     // Setup: 2 models (Pro and Flash)
     // Pro is higher priority (priority 1), Flash is lower (priority 2)
