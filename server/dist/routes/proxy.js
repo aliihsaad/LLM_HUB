@@ -50,8 +50,14 @@ function serializeChatContent(content) {
 function hasImageContent(content) {
     return Array.isArray(content) && content.some(part => part.type === 'image_url');
 }
+function hasVideoContent(content) {
+    return Array.isArray(content) && content.some(part => part.type === 'video_url');
+}
 function requiresVision(messages) {
     return messages.some(m => hasImageContent(m.content));
+}
+function requiresVideo(messages) {
+    return messages.some(m => hasVideoContent(m.content));
 }
 function estimateChatContentTokens(content) {
     if (typeof content === 'string')
@@ -61,8 +67,12 @@ function estimateChatContentTokens(content) {
     return content.reduce((sum, part) => {
         if (part.type === 'text')
             return sum + Math.ceil(part.text.length / 4);
-        // Conservative fixed cost so image requests avoid models with tiny budgets.
-        return sum + 250;
+        if (part.type === 'image_url') {
+            // Conservative fixed cost so image requests avoid models with tiny budgets.
+            return sum + 250;
+        }
+        // Video requests are substantially heavier than single-image prompts.
+        return sum + 1000;
     }, 0);
 }
 function getStickyModel(messages) {
@@ -249,9 +259,15 @@ const chatImageContentPartSchema = z.object({
         detail: z.enum(['auto', 'low', 'high']).optional(),
     }),
 });
+const chatVideoContentPartSchema = z.object({
+    type: z.literal('video_url'),
+    video_url: z.object({
+        url: z.string().min(1),
+    }),
+});
 const userContentSchema = z.union([
     z.string(),
-    z.array(z.union([chatTextContentPartSchema, chatImageContentPartSchema])).min(1),
+    z.array(z.union([chatTextContentPartSchema, chatImageContentPartSchema, chatVideoContentPartSchema])).min(1),
 ]);
 const userMessageSchema = z.object({
     role: z.literal('user'),
@@ -941,6 +957,8 @@ proxyRouter.post('/chat/completions', async (req, res) => {
     const estimatedInputTokens = messages.reduce((sum, m) => sum + estimateChatContentTokens(m.content), 0);
     const estimatedTotal = estimatedInputTokens + (max_tokens ?? 1000);
     const needsVision = requiresVision(messages);
+    const needsVideo = requiresVideo(messages);
+    const requiredCapability = needsVideo ? 'video' : needsVision ? 'vision' : null;
     // Explicit `model` field pins routing. If the catalog has no enabled row
     // matching the requested id, return 400 — silently auto-routing to a
     // different model would be surprising to OpenAI-compatible clients.
@@ -948,16 +966,16 @@ proxyRouter.post('/chat/completions', async (req, res) => {
     let preferredModel;
     if (requestedModel) {
         const db = getDb();
-        if (needsVision) {
+        if (requiredCapability) {
             const row = db.prepare(`
         SELECT m.id, m.enabled AS model_enabled, mc.enabled AS capability_enabled
         FROM models m
         LEFT JOIN model_capabilities mc
-          ON mc.model_db_id = m.id AND mc.capability = 'vision'
+          ON mc.model_db_id = m.id AND mc.capability = ?
         WHERE m.model_id = ?
-      `).get(requestedModel);
+      `).get(requiredCapability, requestedModel);
             if (!row || !row.capability_enabled) {
-                const reason = row ? 'does not support vision' : 'is not in the catalog';
+                const reason = row ? `does not support ${requiredCapability}` : 'is not in the catalog';
                 res.status(400).json({
                     error: {
                         message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
@@ -998,7 +1016,7 @@ proxyRouter.post('/chat/completions', async (req, res) => {
             }
         }
     }
-    else if (!needsVision) {
+    else if (!requiredCapability) {
         preferredModel = getStickyModel(messages);
     }
     // Retry loop: on 429/rate limit, skip that model+key and try the next one
@@ -1008,8 +1026,8 @@ proxyRouter.post('/chat/completions', async (req, res) => {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         let route;
         try {
-            route = needsVision
-                ? routeCapabilityRequest('vision', estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, requestedModel, skipModels.size > 0 ? skipModels : undefined)
+            route = requiredCapability
+                ? routeCapabilityRequest(requiredCapability, estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, requestedModel, skipModels.size > 0 ? skipModels : undefined)
                 : routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, skipModels.size > 0 ? skipModels : undefined);
         }
         catch (err) {
@@ -1597,6 +1615,16 @@ function estimateAudioTextTokens(request) {
     const urlTokens = Math.ceil((request.url?.length ?? 0) / 4);
     return Math.max(100, promptTokens + urlTokens + 100);
 }
+function realtimeWebSocketNotSupported(_req, res) {
+    res.status(400).json({
+        error: {
+            code: 'websocket_not_supported',
+            message: 'FreeLLMAPI does not proxy realtime WebSocket sessions. To use Gemini Live realtime, call POST /v1/realtime/sessions to mint a session token, then connect directly to the returned connect_url using the Gemini Live WebSocket protocol.',
+        },
+    });
+}
+proxyRouter.get('/realtime', realtimeWebSocketNotSupported);
+proxyRouter.post('/realtime', realtimeWebSocketNotSupported);
 proxyRouter.post('/realtime/sessions', async (req, res) => {
     const start = Date.now();
     if (!authenticateProxyRequest(req, res))

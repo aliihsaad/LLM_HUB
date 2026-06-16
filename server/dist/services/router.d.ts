@@ -10,7 +10,7 @@ export interface ModelRuntimeHealth {
     lastSuccessAt: string | null;
     blockedUntil: string | null;
 }
-export type ModelCapability = 'chat' | 'embeddings' | 'vision' | 'images' | 'image_generation' | 'image_edit' | 'image_variation' | 'audio' | 'speech' | 'transcription' | 'translation' | 'realtime_audio';
+export type ModelCapability = 'chat' | 'embeddings' | 'vision' | 'video' | 'images' | 'image_generation' | 'image_edit' | 'image_variation' | 'audio' | 'speech' | 'transcription' | 'translation' | 'realtime_audio';
 export interface RouteResult {
     provider: BaseProvider;
     modelId: string;

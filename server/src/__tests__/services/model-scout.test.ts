@@ -12,7 +12,7 @@ describe('Model scout discovery', () => {
   beforeEach(() => {
     const db = getDb();
     db.prepare('DELETE FROM api_keys').run();
-    for (const modelId of ['test/vision-free:free', 'test/text-free:free']) {
+    for (const modelId of ['test/vision-free:free', 'test/video-free:free', 'test/text-free:free']) {
       const row = db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?').get('openrouter', modelId) as { id: number } | undefined;
       if (row) {
         db.prepare('DELETE FROM fallback_config WHERE model_db_id = ?').run(row.id);
@@ -26,7 +26,7 @@ describe('Model scout discovery', () => {
     vi.restoreAllMocks();
   });
 
-  it('persists OpenRouter image-input models with the vision capability', async () => {
+  it('persists OpenRouter multimodal models with vision and video capabilities', async () => {
     const db = getDb();
     const key = encrypt('or_dynamic_vision_key');
     db.prepare(`
@@ -48,6 +48,12 @@ describe('Model scout discovery', () => {
                 pricing: { prompt: '0', completion: '0' },
               },
               {
+                id: 'test/video-free:free',
+                name: 'Test Video Free',
+                architecture: { input_modalities: ['text', 'image', 'video'], output_modalities: ['text'] },
+                pricing: { prompt: '0', completion: '0' },
+              },
+              {
                 id: 'test/text-free:free',
                 name: 'Test Text Free',
                 architecture: { input_modalities: ['text'], output_modalities: ['text'] },
@@ -64,6 +70,7 @@ describe('Model scout discovery', () => {
 
     expect(result.inserted.map(model => model.modelId)).toEqual([
       'test/vision-free:free',
+      'test/video-free:free',
       'test/text-free:free',
     ]);
 
@@ -72,12 +79,15 @@ describe('Model scout discovery', () => {
       FROM models m
       JOIN model_capabilities mc ON mc.model_db_id = m.id
       WHERE m.platform = 'openrouter'
-        AND m.model_id IN ('test/vision-free:free', 'test/text-free:free')
+        AND m.model_id IN ('test/vision-free:free', 'test/video-free:free', 'test/text-free:free')
       ORDER BY m.model_id, mc.capability
     `).all() as Array<{ model_id: string; capability: string }>;
 
     expect(rows).toEqual([
       { model_id: 'test/text-free:free', capability: 'chat' },
+      { model_id: 'test/video-free:free', capability: 'chat' },
+      { model_id: 'test/video-free:free', capability: 'video' },
+      { model_id: 'test/video-free:free', capability: 'vision' },
       { model_id: 'test/vision-free:free', capability: 'chat' },
       { model_id: 'test/vision-free:free', capability: 'vision' },
     ]);

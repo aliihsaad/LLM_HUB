@@ -63,7 +63,7 @@ interface GoogleModelListResponse {
   }>;
 }
 
-type DiscoveredModelCapability = 'chat' | 'vision';
+type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
 
 interface OpenAICompatModelListEntry {
   id?: string;
@@ -90,6 +90,12 @@ function supportsImageInput(entry: OpenAICompatModelListEntry): boolean {
   return entry.architecture?.modality?.toLowerCase().includes('image') === true;
 }
 
+function supportsVideoInput(entry: OpenAICompatModelListEntry): boolean {
+  const inputModalities = entry.architecture?.input_modalities ?? [];
+  if (inputModalities.some(modality => modality.toLowerCase() === 'video')) return true;
+  return entry.architecture?.modality?.toLowerCase().includes('video') === true;
+}
+
 async function discoverGoogleModels(apiKey: string, knownSet: Set<string>): Promise<DiscoveredModelCandidate[]> {
   const res = await fetch(`${GOOGLE_MODELS_API_BASE}/models?key=${encodeURIComponent(apiKey)}`);
   if (!res.ok) return [];
@@ -110,7 +116,7 @@ async function discoverGoogleModels(apiKey: string, knownSet: Set<string>): Prom
       modelId,
       displayName: entry.displayName ?? displayName,
       enabledByDefault: true,
-      capabilities: ['chat', 'vision'],
+      capabilities: ['chat', 'vision', 'video'],
     });
   }
 
@@ -358,6 +364,9 @@ export async function discoverNewModels(): Promise<DiscoveredModelCandidate[]> {
         const capabilities: DiscoveredModelCapability[] = ['chat'];
         if (platform === 'openrouter' && supportsImageInput(entry)) {
           capabilities.push('vision');
+        }
+        if (platform === 'openrouter' && supportsVideoInput(entry)) {
+          capabilities.push('video');
         }
 
         discoveries.push({

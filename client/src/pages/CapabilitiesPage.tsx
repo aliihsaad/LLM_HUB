@@ -10,6 +10,7 @@ const capabilityLabels: Record<ModelCapability, string> = {
   chat: 'Chat',
   embeddings: 'Embeddings',
   vision: 'Vision',
+  video: 'Video',
   images: 'Images',
   audio: 'Audio',
 }
@@ -81,7 +82,7 @@ export default function CapabilitiesPage() {
     queryFn: () => apiFetch('/api/models/capabilities'),
   })
 
-  const capabilities = data?.capabilities ?? (['chat', 'embeddings', 'vision', 'images', 'audio'] as ModelCapability[])
+  const capabilities = data?.capabilities ?? (['chat', 'embeddings', 'vision', 'video', 'images', 'audio'] as ModelCapability[])
   const providers = data?.providers ?? []
   const providerCount = providers.length
   const keyCount = providers.reduce((acc, provider) => acc + provider.keyCount, 0)

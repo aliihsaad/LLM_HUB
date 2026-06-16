@@ -43,7 +43,7 @@ describe('Models capabilities API', () => {
     const { status, body } = await request(app, 'GET', '/api/models/capabilities');
 
     expect(status).toBe(200);
-    expect(body.capabilities).toEqual(['chat', 'embeddings', 'vision', 'images', 'audio']);
+    expect(body.capabilities).toEqual(['chat', 'embeddings', 'vision', 'video', 'images', 'audio']);
 
     const openrouter = body.providers.find((p: any) => p.platform === 'openrouter');
     expect(openrouter.displayName).toBe('OpenRouter');
@@ -57,6 +57,9 @@ describe('Models capabilities API', () => {
     expect(openrouter.capabilities.vision.supportedModels).toBeGreaterThan(0);
     expect(openrouter.capabilities.vision.configured).toBe(true);
     expect(openrouter.capabilities.vision.status).toBe('configured');
+    expect(openrouter.capabilities.video.supportedModels).toBeGreaterThan(0);
+    expect(openrouter.capabilities.video.configured).toBe(true);
+    expect(openrouter.capabilities.video.status).toBe('configured');
 
     const groq = body.providers.find((p: any) => p.platform === 'groq');
     expect(groq.keyCount).toBe(0);
@@ -109,6 +112,23 @@ describe('Models capabilities API', () => {
     expect(google.capabilities.vision.supportedModels).toBeGreaterThan(0);
     expect(google.capabilities.vision.configured).toBe(true);
     expect(google.capabilities.vision.status).toBe('configured');
+  });
+
+  it('marks Google video as configured when Google keys are present', async () => {
+    await request(app, 'POST', '/api/keys', {
+      platform: 'google',
+      key: 'google_video_capability_key',
+      label: 'video',
+    });
+
+    const { status, body } = await request(app, 'GET', '/api/models/capabilities');
+
+    expect(status).toBe(200);
+    const google = body.providers.find((p: any) => p.platform === 'google');
+    expect(google.keyCount).toBe(1);
+    expect(google.capabilities.video.supportedModels).toBeGreaterThan(0);
+    expect(google.capabilities.video.configured).toBe(true);
+    expect(google.capabilities.video.status).toBe('configured');
   });
 
   it('marks Google images as configured when Google keys are present', async () => {

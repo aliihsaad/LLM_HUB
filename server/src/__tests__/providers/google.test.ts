@@ -215,6 +215,157 @@ describe('GoogleProvider', () => {
     ]);
   });
 
+  it('should translate OpenAI video data URLs to Gemini inlineData parts', async () => {
+    let capturedBody: any;
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          candidates: [{ content: { parts: [{ text: 'video ok' }] }, finishReason: 'STOP' }],
+          usageMetadata: { promptTokenCount: 260, candidatesTokenCount: 2, totalTokenCount: 262 },
+        }),
+      } as any;
+    });
+
+    await provider.chatCompletion(
+      'test-key',
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Summarize this clip' },
+          {
+            type: 'video_url',
+            video_url: {
+              url: 'data:video/mp4;base64,AAAAIGZ0eXBtcDQy',
+            },
+          },
+        ],
+      } as any],
+      'gemini-2.5-flash',
+    );
+
+    expect(capturedBody.contents[0].parts).toEqual([
+      { text: 'Summarize this clip' },
+      { inlineData: { mimeType: 'video/mp4', data: 'AAAAIGZ0eXBtcDQy' } },
+    ]);
+  });
+
+  it('should fetch HTTPS video URLs and translate them to Gemini inlineData parts', async () => {
+    let capturedBody: any;
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr === 'https://cdn.example.test/demo.mp4') {
+        const bytes = Buffer.from('remote-video');
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'video/mp4', 'content-length': '12' }),
+          arrayBuffer: () => Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
+        } as any;
+      }
+
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          candidates: [{ content: { parts: [{ text: 'video url ok' }] }, finishReason: 'STOP' }],
+          usageMetadata: { promptTokenCount: 260, candidatesTokenCount: 2, totalTokenCount: 262 },
+        }),
+      } as any;
+    });
+
+    await provider.chatCompletion(
+      'test-key',
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Summarize this public clip' },
+          {
+            type: 'video_url',
+            video_url: {
+              url: 'https://cdn.example.test/demo.mp4',
+            },
+          },
+        ],
+      } as any],
+      'gemini-2.5-flash',
+    );
+
+    expect(capturedBody.contents[0].parts).toEqual([
+      { text: 'Summarize this public clip' },
+      { inlineData: { mimeType: 'video/mp4', data: Buffer.from('remote-video').toString('base64') } },
+    ]);
+  });
+
+  it.each([
+    ['https://youtube.com/shorts/zX6GCJ_UOLC?feature=share', 'https://www.youtube.com/watch?v=zX6GCJ_UOLC'],
+    ['https://youtu.be/zX6GCJ_UOLC?si=share', 'https://www.youtube.com/watch?v=zX6GCJ_UOLC'],
+    ['https://m.youtube.com/watch?v=zX6GCJ_UOLC&t=2s', 'https://www.youtube.com/watch?v=zX6GCJ_UOLC'],
+  ])('should pass YouTube video URLs to Gemini fileData without downloading them (%s)', async (inputUrl, expectedFileUri) => {
+    let capturedBody: any;
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (!urlStr.includes('generativelanguage.googleapis.com')) {
+        throw new Error(`Unexpected remote video fetch: ${urlStr}`);
+      }
+
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          candidates: [{ content: { parts: [{ text: 'youtube ok' }] }, finishReason: 'STOP' }],
+          usageMetadata: { promptTokenCount: 260, candidatesTokenCount: 2, totalTokenCount: 262 },
+        }),
+      } as any;
+    });
+
+    await provider.chatCompletion(
+      'test-key',
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Summarize this YouTube video' },
+          { type: 'video_url', video_url: { url: inputUrl } },
+        ],
+      } as any],
+      'gemini-2.5-flash',
+    );
+
+    expect(capturedBody.contents[0].parts).toEqual([
+      { text: 'Summarize this YouTube video' },
+      { fileData: { fileUri: expectedFileUri } },
+    ]);
+  });
+
+  it('should reject HTTPS video URLs that resolve to HTML', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr === 'https://cdn.example.test/video-page') {
+        const bytes = Buffer.from('<html></html>');
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'text/html; charset="utf-8"', 'content-length': '13' }),
+          arrayBuffer: () => Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
+        } as any;
+      }
+      throw new Error('Gemini should not be called for non-video remote URLs');
+    });
+
+    await expect(provider.chatCompletion(
+      'test-key',
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Summarize this public clip' },
+          { type: 'video_url', video_url: { url: 'https://cdn.example.test/video-page' } },
+        ],
+      } as any],
+      'gemini-2.5-flash',
+    )).rejects.toThrow(/content type must be video\/\*/i);
+  });
+
   it.each([
     'http://127.0.0.1/image.png',
     'http://localhost/image.png',

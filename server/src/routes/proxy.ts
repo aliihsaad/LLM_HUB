@@ -80,8 +80,16 @@ function hasImageContent(content: ChatMessage['content']): boolean {
   return Array.isArray(content) && content.some(part => part.type === 'image_url');
 }
 
+function hasVideoContent(content: ChatMessage['content']): boolean {
+  return Array.isArray(content) && content.some(part => part.type === 'video_url');
+}
+
 function requiresVision(messages: ChatMessage[]): boolean {
   return messages.some(m => hasImageContent(m.content));
+}
+
+function requiresVideo(messages: ChatMessage[]): boolean {
+  return messages.some(m => hasVideoContent(m.content));
 }
 
 function estimateChatContentTokens(content: ChatMessage['content']): number {
@@ -90,8 +98,12 @@ function estimateChatContentTokens(content: ChatMessage['content']): number {
 
   return content.reduce((sum, part) => {
     if (part.type === 'text') return sum + Math.ceil(part.text.length / 4);
-    // Conservative fixed cost so image requests avoid models with tiny budgets.
-    return sum + 250;
+    if (part.type === 'image_url') {
+      // Conservative fixed cost so image requests avoid models with tiny budgets.
+      return sum + 250;
+    }
+    // Video requests are substantially heavier than single-image prompts.
+    return sum + 1000;
   }, 0);
 }
 
@@ -310,9 +322,16 @@ const chatImageContentPartSchema = z.object({
   }),
 });
 
+const chatVideoContentPartSchema = z.object({
+  type: z.literal('video_url'),
+  video_url: z.object({
+    url: z.string().min(1),
+  }),
+});
+
 const userContentSchema = z.union([
   z.string(),
-  z.array(z.union([chatTextContentPartSchema, chatImageContentPartSchema])).min(1),
+  z.array(z.union([chatTextContentPartSchema, chatImageContentPartSchema, chatVideoContentPartSchema])).min(1),
 ]);
 
 const userMessageSchema = z.object({
@@ -1107,6 +1126,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   const estimatedInputTokens = messages.reduce((sum, m) => sum + estimateChatContentTokens(m.content), 0);
   const estimatedTotal = estimatedInputTokens + (max_tokens ?? 1000);
   const needsVision = requiresVision(messages);
+  const needsVideo = requiresVideo(messages);
+  const requiredCapability = needsVideo ? 'video' : needsVision ? 'vision' : null;
 
   // Explicit `model` field pins routing. If the catalog has no enabled row
   // matching the requested id, return 400 — silently auto-routing to a
@@ -1115,17 +1136,17 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   let preferredModel: number | undefined;
   if (requestedModel) {
     const db = getDb();
-    if (needsVision) {
+    if (requiredCapability) {
       const row = db.prepare(`
         SELECT m.id, m.enabled AS model_enabled, mc.enabled AS capability_enabled
         FROM models m
         LEFT JOIN model_capabilities mc
-          ON mc.model_db_id = m.id AND mc.capability = 'vision'
+          ON mc.model_db_id = m.id AND mc.capability = ?
         WHERE m.model_id = ?
-      `).get(requestedModel) as { id: number; model_enabled: number; capability_enabled: number | null } | undefined;
+      `).get(requiredCapability, requestedModel) as { id: number; model_enabled: number; capability_enabled: number | null } | undefined;
 
       if (!row || !row.capability_enabled) {
-        const reason = row ? 'does not support vision' : 'is not in the catalog';
+        const reason = row ? `does not support ${requiredCapability}` : 'is not in the catalog';
         res.status(400).json({
           error: {
             message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
@@ -1165,7 +1186,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         return;
       }
     }
-  } else if (!needsVision) {
+  } else if (!requiredCapability) {
     preferredModel = getStickyModel(messages);
   }
 
@@ -1177,9 +1198,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     let route: RouteResult;
     try {
-      route = needsVision
+      route = requiredCapability
         ? routeCapabilityRequest(
-          'vision',
+          requiredCapability,
           estimatedTotal,
           skipKeys.size > 0 ? skipKeys : undefined,
           requestedModel,

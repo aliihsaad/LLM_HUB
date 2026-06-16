@@ -4,6 +4,8 @@ LLM-Hub Pro Max is a local OpenAI-compatible routing layer with an admin dashboa
 It unifies multiple AI providers under a single `/v1` API so your apps can switch
 between models and providers without changing client code.
 
+![LLM-Hub dashboard](repo-assets/Readme%20Hero.png)
+
 This project is built on the FreeLLMAPI codebase:
 https://github.com/tashfeenahmed/freellmapi
 
@@ -13,7 +15,8 @@ https://github.com/tashfeenahmed/freellmapi
 - Per-key encrypted storage in local SQLite (`data/freeapi.db`)
 - Sticky fallback routing with cooldowns on rate limits and provider errors
 - Health checks, analytics, request logs, provider ranking, and diagnostics
-- Admin dashboard for keys, fallback chain, model availability, and model discovery
+- Admin dashboard for keys, fallback chain, model availability, capability health, and model discovery
+- Playground coverage for chat, vision, video, embeddings, images, audio, and realtime sessions
 - Optional dashboard PIN lock for management routes and UI
 
 ## Project layout
@@ -92,8 +95,8 @@ responses:
 
 ### Core endpoints
 
-- `GET /v1/models` — list enabled routed models
-- `POST /v1/chat/completions` — streaming and non-streaming chat
+- `GET /v1/models` — list enabled routed models with capability metadata
+- `POST /v1/chat/completions` — streaming and non-streaming chat, including `image_url` and `video_url` multimodal content parts
 - `POST /v1/embeddings` — shared embed endpoint
 - `POST /v1/images/generations` — image generation
 - `POST /v1/images/edits` — multipart image edit with prompt + optional mask
@@ -104,6 +107,11 @@ responses:
 - `POST /v1/realtime/sessions` — realtime session token issuance
 
 `POST /v1/completions` is not currently implemented.
+
+Direct `GET` or `POST` requests to `/v1/realtime` return a clear
+`websocket_not_supported` JSON error. LLM-Hub mints realtime session tokens but
+does not proxy live WebSocket traffic; connect directly to the returned
+`connect_url` from `/v1/realtime/sessions`.
 
 ### Example usage
 
@@ -135,6 +143,26 @@ curl http://localhost:3001/v1/chat/completions \
 Tool calling is passed through when supported by the selected capability and models.
 Send standard OpenAI-style `tools` and `tool_choice` fields in chat requests.
 
+### Multimodal chat
+
+Vision requests use OpenAI-style `image_url` content parts. Video requests use
+`video_url` content parts and are routed to models with the `video` capability:
+
+```json
+{
+  "model": "auto",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Summarize this clip in three bullets." },
+        { "type": "video_url", "video_url": { "url": "https://www.youtube.com/watch?v=..." } }
+      ]
+    }
+  ]
+}
+```
+
 ## Admin API (`/api`)
 
 Dashboard uses these endpoints and they are also available directly:
@@ -150,6 +178,7 @@ Dashboard uses these endpoints and they are also available directly:
 - `GET /api/fallback`
 - `PUT /api/fallback`
 - `POST /api/fallback/sort/:preset` (`intelligence`, `speed`, `budget`)
+- `POST /api/fallback/quarantined/disable`
 - `GET /api/fallback/token-usage`
 - `GET /api/health`, `POST /api/health/check/:keyId`, `POST /api/health/check-all`
 - `GET /api/analytics/summary?range=24h|7d|30d`

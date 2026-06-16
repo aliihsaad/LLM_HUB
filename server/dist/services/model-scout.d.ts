@@ -24,7 +24,7 @@ export interface DiscoveredModelResult {
     skippedKnownCount: number;
     insertedModelIds: number[];
 }
-type DiscoveredModelCapability = 'chat' | 'vision';
+type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
 /**
  * Check if a specific model is still available on the free tier.
  *

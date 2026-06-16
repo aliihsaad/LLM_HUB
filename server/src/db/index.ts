@@ -1089,6 +1089,24 @@ function seedModelCapabilities(db: Database.Database) {
     ['openrouter', 'openrouter/free', 'OpenRouter Free Vision Router', 29, 9, 'Vision', 20, 200, null, null, '~6M', null],
   ];
 
+  const openRouterVideoModels: Array<[
+    string,
+    string,
+    string,
+    number,
+    number,
+    string,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    string,
+    number | null,
+  ]> = [
+    ['openrouter', 'minimax/minimax-m3', 'MiniMax M3 Video (OpenRouter)', 35, 7, 'Video', null, null, null, null, 'video', 262144],
+    ['openrouter', 'stepfun/step-3.7-flash', 'Step 3.7 Flash Video (OpenRouter)', 36, 7, 'Video', null, null, null, null, 'video', 262144],
+  ];
+
   const audioModels: Array<[
     string,
     string,
@@ -1180,6 +1198,7 @@ function seedModelCapabilities(db: Database.Database) {
 
     for (const model of visionModels) {
       addCapability.run(model.id, 'vision', model.intelligence_rank, model.enabled);
+      addCapability.run(model.id, 'video', model.intelligence_rank, model.enabled);
     }
 
     const fallbackBase = (maxFallbackPriority.get() as { mx: number }).mx;
@@ -1217,13 +1236,24 @@ function seedModelCapabilities(db: Database.Database) {
       }
     }
 
+    for (let i = 0; i < openRouterVideoModels.length; i++) {
+      const model = openRouterVideoModels[i];
+      insertCapabilityModel.run(...model);
+      const row = getModelId.get(model[0], model[1]) as { id: number } | undefined;
+      if (row) {
+        addCapability.run(row.id, 'chat', model[3], 1);
+        addCapability.run(row.id, 'video', i + 1, 1);
+        addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + i + 1);
+      }
+    }
+
     for (let i = 0; i < audioModels.length; i++) {
       const model = audioModels[i];
       insertCapabilityModel.run(...model);
       const row = getModelId.get(model[0], model[1]) as { id: number } | undefined;
       if (row) {
         addCapability.run(row.id, 'audio', i + 1, 1);
-        addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + i + 1);
+        addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + openRouterVideoModels.length + i + 1);
       }
     }
 

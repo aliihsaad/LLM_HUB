@@ -5,6 +5,7 @@ export type PlaygroundCapabilityMode =
   | 'gemini_generate'
   | 'gemini_stream'
   | 'vision'
+  | 'video'
   | 'embeddings'
   | 'image_generation'
   | 'image_edit'
@@ -20,6 +21,7 @@ export type PlaygroundRouteCapability =
   | 'chat'
   | 'embeddings'
   | 'vision'
+  | 'video'
   | 'image_generation'
   | 'image_edit'
   | 'image_variation'
@@ -68,6 +70,13 @@ export const PLAYGROUND_MODES: PlaygroundModeDefinition[] = [
     id: 'vision',
     capability: 'vision',
     label: 'Vision',
+    endpoint: '/v1/chat/completions',
+    requestKind: 'json',
+  },
+  {
+    id: 'video',
+    capability: 'video',
+    label: 'Video',
     endpoint: '/v1/chat/completions',
     requestKind: 'json',
   },
@@ -141,6 +150,8 @@ export function getPlaygroundRouteCapability(mode: PlaygroundCapabilityMode): Pl
       return 'embeddings';
     case 'vision':
       return 'vision';
+    case 'video':
+      return 'video';
     case 'image_generation':
       return 'image_generation';
     case 'image_edit':

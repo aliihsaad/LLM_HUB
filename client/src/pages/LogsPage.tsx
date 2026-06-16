@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
+import { BarChart3, ClipboardList, Flag, RefreshCw } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import type {
 
 type TimeRange = '24h' | '7d' | '30d'
 type StatusFilter = 'all' | 'success' | 'error'
+type LogsView = 'rankings' | 'flags' | 'recent'
 
 const categoryLabels: Record<LogErrorCategory, string> = {
   zero_quota: 'Zero quota',
@@ -50,6 +51,12 @@ const statusLabels: Record<StatusFilter, string> = {
   success: 'Success',
   error: 'Errors',
 }
+
+const logsTabs: Array<{ key: LogsView; label: string; icon: typeof BarChart3 }> = [
+  { key: 'rankings', label: 'Provider ranking', icon: BarChart3 },
+  { key: 'flags', label: 'Diagnosis flags', icon: Flag },
+  { key: 'recent', label: 'Recent logs', icon: ClipboardList },
+]
 
 function formatTokens(n?: number): string {
   if (!n) return '0'
@@ -118,6 +125,53 @@ function ProviderStatusBadge({ status }: { status: ProviderRanking['status'] }) 
   )
 }
 
+function LogsTabs({
+  value,
+  onChange,
+  counts,
+}: {
+  value: LogsView
+  onChange: (value: LogsView) => void
+  counts: Record<LogsView, number>
+}) {
+  const tabIdleClass =
+    'border border-border/55 text-muted-foreground hover:text-foreground hover:border-primary/70 hover:bg-primary/8'
+  const tabActiveClass =
+    'border border-primary/70 bg-primary/15 text-foreground dark:text-primary-foreground font-semibold shadow-sm'
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Logs sections"
+      className="flex w-full flex-nowrap gap-2 overflow-x-auto border-b border-border/70 pb-2"
+    >
+      {logsTabs.map(option => {
+        const Icon = option.icon
+        const active = value === option.key
+        return (
+          <Button
+            key={option.key}
+            role="tab"
+            id={`logs-tab-${option.key}`}
+            aria-controls={`logs-panel-${option.key}`}
+            aria-selected={active}
+            variant="outline"
+            size="sm"
+            onClick={() => onChange(option.key)}
+            className={`gap-1.5 whitespace-nowrap transition-colors ${active ? tabActiveClass : tabIdleClass}`}
+          >
+            <Icon className="size-3.5" />
+            {option.label}
+            <span className="ml-1 rounded bg-background/50 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+              {counts[option.key]}
+            </span>
+          </Button>
+        )
+      })}
+    </div>
+  )
+}
+
 function buildLogsPath(range: TimeRange, status: StatusFilter, platform: string): string {
   const params = new URLSearchParams({ range, status, limit: '150' })
   if (platform !== 'all') params.set('platform', platform)
@@ -128,6 +182,7 @@ export default function LogsPage() {
   const [range, setRange] = useState<TimeRange>('24h')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [platform, setPlatform] = useState('all')
+  const [view, setView] = useState<LogsView>('rankings')
 
   const { data, isLoading, refetch, isFetching } = useQuery<LogsDiagnosticsResponse>({
     queryKey: ['logs', range, status, platform],
@@ -146,6 +201,11 @@ export default function LogsPage() {
   const rankings = data?.rankings ?? []
   const flags = data?.flags ?? []
   const recent = data?.recent ?? []
+  const tabCounts = {
+    rankings: rankings.length,
+    flags: flags.length,
+    recent: recent.length,
+  }
 
   return (
     <div>
@@ -204,132 +264,144 @@ export default function LogsPage() {
           <Stat label="Tokens" value={formatTokens(summary?.totalTokens)} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1.25fr_0.75fr] gap-6">
-          <Panel title="Provider ranking">
-            {isLoading ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">Loading...</p>
-            ) : rankings.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">No request data for this filter.</p>
-            ) : (
-              <div className="-mx-4 max-h-[420px] overflow-y-auto px-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="pl-4 w-12">Rank</TableHead>
-                      <TableHead>Provider</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Score</TableHead>
-                      <TableHead className="text-right">Requests</TableHead>
-                      <TableHead className="text-right">Success</TableHead>
-                      <TableHead className="text-right">Latency</TableHead>
-                      <TableHead className="text-right pr-4">Keys</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rankings.map(row => (
-                      <TableRow key={row.platform}>
-                        <TableCell className="pl-4 text-xs tabular-nums text-muted-foreground">#{row.rank}</TableCell>
-                        <TableCell>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{row.platform}</p>
-                            <p className="text-xs text-muted-foreground truncate">
-                              {row.topFlag ? categoryLabels[row.topFlag] : 'No flags'}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell><ProviderStatusBadge status={row.status} /></TableCell>
-                        <TableCell className="text-right tabular-nums">{row.score}</TableCell>
-                        <TableCell className="text-right tabular-nums">{row.requests}</TableCell>
-                        <TableCell className="text-right tabular-nums">{row.successRate}%</TableCell>
-                        <TableCell className="text-right tabular-nums">{row.avgLatencyMs} ms</TableCell>
-                        <TableCell className="text-right tabular-nums pr-4">
-                          {row.healthyKeys}/{row.keyCount}
-                          {row.invalidKeys > 0 && <span className="text-destructive ml-1">+{row.invalidKeys}</span>}
-                        </TableCell>
+        <LogsTabs value={view} onChange={setView} counts={tabCounts} />
+
+        {view === 'rankings' && (
+          <section id="logs-panel-rankings" role="tabpanel" aria-labelledby="logs-tab-rankings">
+            <Panel title="Provider ranking">
+              {isLoading ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">Loading...</p>
+              ) : rankings.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No request data for this filter.</p>
+              ) : (
+                <div className="-mx-4 max-h-[420px] overflow-y-auto px-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="pl-4 w-12">Rank</TableHead>
+                        <TableHead>Provider</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Score</TableHead>
+                        <TableHead className="text-right">Requests</TableHead>
+                        <TableHead className="text-right">Success</TableHead>
+                        <TableHead className="text-right">Latency</TableHead>
+                        <TableHead className="text-right pr-4">Keys</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </Panel>
+                    </TableHeader>
+                    <TableBody>
+                      {rankings.map(row => (
+                        <TableRow key={row.platform}>
+                          <TableCell className="pl-4 text-xs tabular-nums text-muted-foreground">#{row.rank}</TableCell>
+                          <TableCell>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">{row.platform}</p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {row.topFlag ? categoryLabels[row.topFlag] : 'No flags'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell><ProviderStatusBadge status={row.status} /></TableCell>
+                          <TableCell className="text-right tabular-nums">{row.score}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.requests}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.successRate}%</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.avgLatencyMs} ms</TableCell>
+                          <TableCell className="text-right tabular-nums pr-4">
+                            {row.healthyKeys}/{row.keyCount}
+                            {row.invalidKeys > 0 && <span className="text-destructive ml-1">+{row.invalidKeys}</span>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Panel>
+          </section>
+        )}
 
-          <Panel title="Diagnosis flags">
-            {flags.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">No flags for this filter.</p>
-            ) : (
-              <div className="space-y-3">
-                {flags.slice(0, 8).map(flag => (
-                  <Card key={flag.id} className="overflow-hidden">
-                    <CardContent className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <SeverityBadge severity={flag.severity} />
-                        <Badge variant="outline">{categoryLabels[flag.category]}</Badge>
-                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">{flag.count}</span>
-                      </div>
-                      <p className="mt-2 text-sm font-medium">{flag.title}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{flag.platform}{flag.modelId ? ` / ${flag.modelId}` : ''}</p>
-                      <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{flag.recommendation}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </Panel>
-        </div>
-
-        <Panel title="Recent logs">
-          {recent.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-8 text-center">No logs for this filter.</p>
-          ) : (
-            <div className="-mx-4 max-h-[520px] overflow-y-auto px-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="pl-4">Time</TableHead>
-                    <TableHead>Provider</TableHead>
-                    <TableHead>Model</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Flag</TableHead>
-                    <TableHead className="text-right">Latency</TableHead>
-                    <TableHead className="text-right">Tokens</TableHead>
-                    <TableHead className="pr-4">Message</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recent.map((entry: LogEntry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell className="pl-4 text-xs tabular-nums text-muted-foreground whitespace-nowrap">
-                        {formatTime(entry.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-xs font-medium">{entry.platform}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate">{entry.modelId}</TableCell>
-                      <TableCell>
-                        <Badge variant={entry.status === 'success' ? 'secondary' : 'destructive'}>
-                          {entry.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {entry.errorCategory ? (
-                          <Badge variant="outline">{categoryLabels[entry.errorCategory]}</Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{entry.latencyMs} ms</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatTokens(entry.inputTokens + entry.outputTokens)}</TableCell>
-                      <TableCell className="pr-4 text-xs max-w-[340px]">
-                        <div className="truncate" title={entry.error ?? entry.suggestion}>
-                          {entry.error ?? entry.suggestion}
+        {view === 'flags' && (
+          <section id="logs-panel-flags" role="tabpanel" aria-labelledby="logs-tab-flags">
+            <Panel title="Diagnosis flags">
+              {flags.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No flags for this filter.</p>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {flags.map(flag => (
+                    <Card key={flag.id} className="overflow-hidden rounded-lg">
+                      <CardContent className="px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <SeverityBadge severity={flag.severity} />
+                          <Badge variant="outline">{categoryLabels[flag.category]}</Badge>
+                          <span className="ml-auto text-xs tabular-nums text-muted-foreground">{flag.count}</span>
                         </div>
-                      </TableCell>
-                    </TableRow>
+                        <p className="mt-2 text-sm font-medium">{flag.title}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{flag.platform}{flag.modelId ? ` / ${flag.modelId}` : ''}</p>
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{flag.recommendation}</p>
+                      </CardContent>
+                    </Card>
                   ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </Panel>
+                </div>
+              )}
+            </Panel>
+          </section>
+        )}
+
+        {view === 'recent' && (
+          <section id="logs-panel-recent" role="tabpanel" aria-labelledby="logs-tab-recent">
+            <Panel title="Recent logs">
+              {recent.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No logs for this filter.</p>
+              ) : (
+                <div className="-mx-4 max-h-[520px] overflow-y-auto px-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="pl-4">Time</TableHead>
+                        <TableHead>Provider</TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Flag</TableHead>
+                        <TableHead className="text-right">Latency</TableHead>
+                        <TableHead className="text-right">Tokens</TableHead>
+                        <TableHead className="pr-4">Message</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recent.map((entry: LogEntry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell className="pl-4 text-xs tabular-nums text-muted-foreground whitespace-nowrap">
+                            {formatTime(entry.createdAt)}
+                          </TableCell>
+                          <TableCell className="text-xs font-medium">{entry.platform}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate">{entry.modelId}</TableCell>
+                          <TableCell>
+                            <Badge variant={entry.status === 'success' ? 'secondary' : 'destructive'}>
+                              {entry.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {entry.errorCategory ? (
+                              <Badge variant="outline">{categoryLabels[entry.errorCategory]}</Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{entry.latencyMs} ms</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatTokens(entry.inputTokens + entry.outputTokens)}</TableCell>
+                          <TableCell className="pr-4 text-xs max-w-[340px]">
+                            <div className="truncate" title={entry.error ?? entry.suggestion}>
+                              {entry.error ?? entry.suggestion}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Panel>
+          </section>
+        )}
       </div>
     </div>
   )

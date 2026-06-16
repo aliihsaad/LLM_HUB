@@ -37,6 +37,7 @@ const capabilityDescriptions: Record<PlaygroundCapabilityMode, string> = {
   gemini_generate: 'Send a Google Gemini generateContent request through the local routing layer.',
   gemini_stream: 'Stream a Gemini-compatible response through the local routing layer.',
   vision: 'Send text plus image URLs or data URLs to a vision-capable model.',
+  video: 'Send text plus video URLs or data URLs to a video-capable model.',
   embeddings: 'Create vectors for search, memory, or ranking workflows.',
   image_generation: 'Generate an image and receive base64 output by default.',
   image_edit: 'Upload an image and prompt for provider-backed edits.',
@@ -296,6 +297,21 @@ function javascriptSnippet(mode: PlaygroundCapabilityMode, baseUrl: string) {
         ``,
         `console.log(response.choices[0]?.message?.content);`,
       ].join('\n')
+    case 'video':
+      return [
+        `const response = await client.chat.completions.create({`,
+        `  model: "auto",`,
+        `  messages: [{`,
+        `    role: "user",`,
+        `    content: [`,
+        `      { type: "text", text: "Summarize this video." },`,
+        `      { type: "video_url", video_url: { url: "https://example.com/video.mp4" } },`,
+        `    ],`,
+        `  }],`,
+        `});`,
+        ``,
+        `console.log(response.choices[0]?.message?.content);`,
+      ].join('\n')
     case 'embeddings':
       return [
         `const embedding = await client.embeddings.create({`,
@@ -429,6 +445,21 @@ function pythonSnippet(mode: PlaygroundCapabilityMode, baseUrl: string) {
         ``,
         `print(response.choices[0].message.content)`,
       ].join('\n')
+    case 'video':
+      return [
+        `response = client.chat.completions.create(`,
+        `    model="auto",`,
+        `    messages=[{`,
+        `        "role": "user",`,
+        `        "content": [`,
+        `            {"type": "text", "text": "Summarize this video."},`,
+        `            {"type": "video_url", "video_url": {"url": "https://example.com/video.mp4"}},`,
+        `        ],`,
+        `    }],`,
+        `)`,
+        ``,
+        `print(response.choices[0].message.content)`,
+      ].join('\n')
     case 'embeddings':
       return [
         `embedding = client.embeddings.create(`,
@@ -546,6 +577,13 @@ function curlSnippet(mode: PlaygroundCapabilityMode) {
         `  -H "Authorization: Bearer $env:LLMHUB_KEY" \\`,
         `  -H "Content-Type: application/json" \\`,
         `  -d '{"model":"auto","messages":[{"role":"user","content":[{"type":"text","text":"What is in this image?"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}'`,
+      ].join('\n')
+    case 'video':
+      return [
+        `curl "$env:LLMHUB_BASE_URL/chat/completions" \\`,
+        `  -H "Authorization: Bearer $env:LLMHUB_KEY" \\`,
+        `  -H "Content-Type: application/json" \\`,
+        `  -d '{"model":"auto","messages":[{"role":"user","content":[{"type":"text","text":"Summarize this video."},{"type":"video_url","video_url":{"url":"https://example.com/video.mp4"}}]}]}'`,
       ].join('\n')
     case 'embeddings':
       return [

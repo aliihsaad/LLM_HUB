@@ -997,6 +997,10 @@ function seedModelCapabilities(db) {
         ['openrouter', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'Nemotron 3 Nano Omni 30B (free)', 28, 9, 'Vision', 20, 200, null, null, '~6M', 262144],
         ['openrouter', 'openrouter/free', 'OpenRouter Free Vision Router', 29, 9, 'Vision', 20, 200, null, null, '~6M', null],
     ];
+    const openRouterVideoModels = [
+        ['openrouter', 'minimax/minimax-m3', 'MiniMax M3 Video (OpenRouter)', 35, 7, 'Video', null, null, null, null, 'video', 262144],
+        ['openrouter', 'stepfun/step-3.7-flash', 'Step 3.7 Flash Video (OpenRouter)', 36, 7, 'Video', null, null, null, null, 'video', 262144],
+    ];
     const audioModels = [
         ['google', 'gemini-2.5-flash-preview-tts', 'Gemini 2.5 Flash TTS', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
         ['google', 'gemini-3.1-flash-tts-preview', 'Gemini 3.1 Flash TTS Preview', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
@@ -1071,6 +1075,7 @@ function seedModelCapabilities(db) {
         }
         for (const model of visionModels) {
             addCapability.run(model.id, 'vision', model.intelligence_rank, model.enabled);
+            addCapability.run(model.id, 'video', model.intelligence_rank, model.enabled);
         }
         const fallbackBase = maxFallbackPriority.get().mx;
         for (let i = 0; i < embeddingModels.length; i++) {
@@ -1104,13 +1109,23 @@ function seedModelCapabilities(db) {
                 addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + i + 1);
             }
         }
+        for (let i = 0; i < openRouterVideoModels.length; i++) {
+            const model = openRouterVideoModels[i];
+            insertCapabilityModel.run(...model);
+            const row = getModelId.get(model[0], model[1]);
+            if (row) {
+                addCapability.run(row.id, 'chat', model[3], 1);
+                addCapability.run(row.id, 'video', i + 1, 1);
+                addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + i + 1);
+            }
+        }
         for (let i = 0; i < audioModels.length; i++) {
             const model = audioModels[i];
             insertCapabilityModel.run(...model);
             const row = getModelId.get(model[0], model[1]);
             if (row) {
                 addCapability.run(row.id, 'audio', i + 1, 1);
-                addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + i + 1);
+                addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + openRouterVideoModels.length + i + 1);
             }
         }
         for (const [platform, modelId, capability, priority] of audioRouteCapabilities) {

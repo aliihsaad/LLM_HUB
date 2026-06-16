@@ -82,6 +82,7 @@ const defaultPrompt: Record<PlaygroundCapabilityMode, string> = {
   gemini_generate: 'Explain this Gemini-compatible route in one sentence.',
   gemini_stream: 'Stream a short answer from the Gemini-compatible route.',
   vision: 'What is shown in this image?',
+  video: 'Summarize this video in three bullet points.',
   embeddings: 'LLM-Hub routes embeddings through configured providers.',
   image_generation: 'A clean black-and-white app icon for a local AI gateway dashboard.',
   image_edit: 'Replace the background with a clean white studio backdrop.',
@@ -183,6 +184,7 @@ export default function PlaygroundPage() {
   const [modelOverride, setModelOverride] = useState('')
   const [prompt, setPrompt] = useState(defaultPrompt.chat)
   const [imageUrl, setImageUrl] = useState('')
+  const [videoUrl, setVideoUrl] = useState('')
   const [visionFileName, setVisionFileName] = useState('')
   const [voice, setVoice] = useState('alloy')
   const [speechFormat, setSpeechFormat] = useState('wav')
@@ -502,6 +504,16 @@ export default function PlaygroundPage() {
           { type: 'image_url', image_url: { url: imageUrl.trim() } },
         ],
       }]
+    } else if (mode === 'video') {
+      if (!prompt.trim()) throw new Error('Enter a video prompt.')
+      if (!videoUrl.trim()) throw new Error('Provide a YouTube, direct video, or data:video/...;base64,... URL.')
+      body.messages = [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt.trim() },
+          { type: 'video_url', video_url: { url: videoUrl.trim() } },
+        ],
+      }]
     } else if (mode === 'embeddings') {
       if (!prompt.trim()) throw new Error('Enter text to embed.')
       body.input = prompt.trim()
@@ -547,7 +559,7 @@ export default function PlaygroundPage() {
     if (mode === 'gemini_generate') {
       return geminiTextFromCandidate(data) ?? formatJson(data)
     }
-    if (mode === 'chat' || mode === 'vision') {
+    if (mode === 'chat' || mode === 'vision' || mode === 'video') {
       return data.choices?.[0]?.message?.content ?? formatJson(data)
     }
     if (mode === 'embeddings') {
@@ -893,6 +905,18 @@ function fileToDataUrl(file: File): Promise<string> {
                     className="font-mono text-xs"
                   />
                 </div>
+              </div>
+            )}
+
+            {mode === 'video' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Video URL</Label>
+                <Input
+                  value={videoUrl}
+                  onChange={e => setVideoUrl(e.target.value)}
+                  placeholder="YouTube, https://.../clip.mp4, or data:video/mp4;base64,..."
+                  className="font-mono text-xs"
+                />
               </div>
             )}
 

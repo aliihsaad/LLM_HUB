@@ -32,6 +32,12 @@ function supportsImageInput(entry) {
         return true;
     return entry.architecture?.modality?.toLowerCase().includes('image') === true;
 }
+function supportsVideoInput(entry) {
+    const inputModalities = entry.architecture?.input_modalities ?? [];
+    if (inputModalities.some(modality => modality.toLowerCase() === 'video'))
+        return true;
+    return entry.architecture?.modality?.toLowerCase().includes('video') === true;
+}
 async function discoverGoogleModels(apiKey, knownSet) {
     const res = await fetch(`${GOOGLE_MODELS_API_BASE}/models?key=${encodeURIComponent(apiKey)}`);
     if (!res.ok)
@@ -52,7 +58,7 @@ async function discoverGoogleModels(apiKey, knownSet) {
             modelId,
             displayName: entry.displayName ?? displayName,
             enabledByDefault: true,
-            capabilities: ['chat', 'vision'],
+            capabilities: ['chat', 'vision', 'video'],
         });
     }
     return discoveries;
@@ -264,6 +270,9 @@ export async function discoverNewModels() {
                 const capabilities = ['chat'];
                 if (platform === 'openrouter' && supportsImageInput(entry)) {
                     capabilities.push('vision');
+                }
+                if (platform === 'openrouter' && supportsVideoInput(entry)) {
+                    capabilities.push('video');
                 }
                 discoveries.push({
                     platform: platform,

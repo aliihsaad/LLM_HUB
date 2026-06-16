@@ -55,6 +55,7 @@ export type ModelCapability =
   | 'chat'
   | 'embeddings'
   | 'vision'
+  | 'video'
   | 'images'
   | 'image_generation'
   | 'image_edit'

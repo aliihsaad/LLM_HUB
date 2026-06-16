@@ -7,7 +7,7 @@ import { getProviderMetadata, listProviderMetadata, PLATFORM_ORDER } from '../li
 
 export const modelsRouter = Router();
 
-const CAPABILITIES: ModelCapability[] = ['chat', 'embeddings', 'vision', 'images', 'audio'];
+const CAPABILITIES: ModelCapability[] = ['chat', 'embeddings', 'vision', 'video', 'images', 'audio'];
 
 modelsRouter.get('/providers', (_req: Request, res: Response) => {
   const result: ProvidersResponse = {

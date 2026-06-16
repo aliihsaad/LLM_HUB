@@ -24,12 +24,17 @@ const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const API_BASE_V1ALPHA = 'https://generativelanguage.googleapis.com/v1alpha';
 const GEMINI_LIVE_CONSTRAINED_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
 const MAX_REMOTE_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_REMOTE_VIDEO_BYTES = 20 * 1024 * 1024;
 
 interface GeminiPart {
   text?: string;
   inlineData?: {
     mimeType: string;
     data: string;
+  };
+  fileData?: {
+    fileUri: string;
+    mimeType?: string;
   };
   thought?: boolean;
   thoughtSignature?: string;
@@ -136,6 +141,14 @@ function parseImageDataUrl(url: string): { mimeType: string; data: string } {
   return { mimeType: match[1], data: match[2] };
 }
 
+function parseVideoDataUrl(url: string): { mimeType: string; data: string } {
+  const match = /^data:(video\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/i.exec(url);
+  if (!match) {
+    throw new Error('Invalid video URL. Use data:video/...;base64,... or a safe http(s) video URL.');
+  }
+  return { mimeType: match[1], data: match[2] };
+}
+
 async function imageUrlToInlineData(rawUrl: string): Promise<{ mimeType: string; data: string }> {
   if (rawUrl.startsWith('data:')) return parseImageDataUrl(rawUrl);
   const url = validateRemoteImageUrl(rawUrl);
@@ -166,6 +179,79 @@ async function imageUrlToInlineData(rawUrl: string): Promise<{ mimeType: string;
   return { mimeType: contentType, data: data.toString('base64') };
 }
 
+async function videoUrlToGeminiPart(rawUrl: string): Promise<GeminiPart> {
+  if (rawUrl.startsWith('data:')) {
+    return { inlineData: parseVideoDataUrl(rawUrl) };
+  }
+
+  const youtubeUrl = toCanonicalYouTubeWatchUrl(rawUrl);
+  if (youtubeUrl) {
+    return { fileData: { fileUri: youtubeUrl } };
+  }
+
+  return { inlineData: await videoUrlToInlineData(rawUrl) };
+}
+
+function toCanonicalYouTubeWatchUrl(rawUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  const normalizedHost = host.replace(/^(www|m)\./, '');
+  const segments = url.pathname.split('/').filter(Boolean);
+  let videoId: string | null = null;
+
+  if (normalizedHost === 'youtu.be') {
+    videoId = segments[0] ?? null;
+  } else if (normalizedHost === 'youtube.com') {
+    if (url.pathname === '/watch') {
+      videoId = url.searchParams.get('v');
+    } else if ((segments[0] === 'shorts' || segments[0] === 'embed') && segments[1]) {
+      videoId = segments[1];
+    }
+  } else if (normalizedHost === 'youtube-nocookie.com' && segments[0] === 'embed' && segments[1]) {
+    videoId = segments[1];
+  }
+
+  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+}
+
+async function videoUrlToInlineData(rawUrl: string): Promise<{ mimeType: string; data: string }> {
+  const url = validateRemoteVideoUrl(rawUrl);
+
+  const res = await fetch(url, { method: 'GET', redirect: 'manual' });
+  if (res.status >= 300 && res.status < 400) {
+    throw new Error('Remote video URL redirects are not allowed');
+  }
+  if (!res.ok) {
+    throw new Error(`Remote video URL fetch failed with status ${res.status}`);
+  }
+
+  const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  if (!contentType.startsWith('video/')) {
+    throw new Error(`Remote video URL content type must be video/*, got '${contentType || 'unknown'}'`);
+  }
+
+  const contentLength = Number(res.headers.get('content-length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > MAX_REMOTE_VIDEO_BYTES) {
+    throw new Error('Remote video URL video is too large');
+  }
+
+  const data = Buffer.from(await res.arrayBuffer());
+  if (data.byteLength > MAX_REMOTE_VIDEO_BYTES) {
+    throw new Error('Remote video URL video is too large');
+  }
+
+  return { mimeType: contentType, data: data.toString('base64') };
+}
+
 function validateRemoteImageUrl(rawUrl: string): string {
   let url: URL;
   try {
@@ -180,6 +266,25 @@ function validateRemoteImageUrl(rawUrl: string): string {
 
   if (isBlockedRemoteHost(url.hostname)) {
     throw new Error('Remote image URL host is blocked');
+  }
+
+  return url.toString();
+}
+
+function validateRemoteVideoUrl(rawUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error('Invalid remote video URL');
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Remote video URL protocol must be http or https');
+  }
+
+  if (isBlockedRemoteHost(url.hostname)) {
+    throw new Error('Remote video URL host is blocked');
   }
 
   return url.toString();
@@ -231,7 +336,12 @@ async function toGeminiUserParts(content: ChatMessage['content']): Promise<Gemin
       continue;
     }
 
-    parts.push({ inlineData: await imageUrlToInlineData(part.image_url.url) });
+    if (part.type === 'image_url') {
+      parts.push({ inlineData: await imageUrlToInlineData(part.image_url.url) });
+      continue;
+    }
+
+    parts.push(await videoUrlToGeminiPart(part.video_url.url));
   }
 
   return parts.length > 0 ? parts : [{ text: '' }];
