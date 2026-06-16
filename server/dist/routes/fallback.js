@@ -91,6 +91,48 @@ const toggleSchema = z.object({
 const retrySchema = z.object({
     confirm: z.boolean().optional(),
 });
+fallbackRouter.post('/quarantined/disable', (_req, res) => {
+    const db = getDb();
+    const rows = db.prepare(`
+    SELECT fc.model_db_id
+    FROM fallback_config fc
+    JOIN models m ON m.id = fc.model_db_id
+    JOIN model_runtime_health rh ON rh.model_db_id = fc.model_db_id
+    LEFT JOIN model_capabilities mc
+      ON mc.model_db_id = m.id
+      AND mc.capability = 'chat'
+    WHERE fc.enabled = 1
+      AND EXISTS (
+        SELECT 1
+        FROM api_keys ak
+        WHERE ak.platform = m.platform
+          AND ak.enabled = 1
+          AND ak.status != 'invalid'
+      )
+      AND (
+        mc.id IS NOT NULL
+        OR NOT EXISTS (
+          SELECT 1 FROM model_capabilities any_mc
+          WHERE any_mc.model_db_id = m.id
+        )
+      )
+      AND (
+        rh.status != 'healthy'
+        OR rh.blocked_until IS NOT NULL
+        OR rh.last_error_category IS NOT NULL
+      )
+    ORDER BY fc.priority ASC
+  `).all();
+    const modelDbIds = rows.map(row => row.model_db_id);
+    const update = db.prepare('UPDATE fallback_config SET enabled = 0 WHERE model_db_id = ?');
+    const disableAll = db.transaction(() => {
+        for (const modelDbId of modelDbIds) {
+            update.run(modelDbId);
+        }
+    });
+    disableAll();
+    res.json({ success: true, disabledCount: modelDbIds.length, modelDbIds });
+});
 // Update fallback chain (full replace)
 fallbackRouter.put('/', (req, res) => {
     const parsed = updateSchema.safeParse(req.body);

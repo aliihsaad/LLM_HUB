@@ -269,6 +269,50 @@ describe('Fallback API', () => {
     });
   });
 
+  it('POST /api/fallback/quarantined/disable turns off all quarantined fallback models', async () => {
+    const { body: original } = await request(app, 'GET', '/api/fallback');
+    const targets = original.filter((entry: any) => entry.enabled).slice(0, 2);
+    const untouched = original.find((entry: any) =>
+      entry.enabled && !targets.some((target: any) => target.modelDbId === entry.modelDbId)
+    );
+    expect(targets).toHaveLength(2);
+    expect(untouched).toBeDefined();
+
+    const targetIds = targets.map((entry: any) => entry.modelDbId);
+    const targetPlatforms = [...new Set(targets.map((entry: any) => entry.platform))];
+    for (const platform of targetPlatforms) {
+      getDb().prepare(`
+        INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+        VALUES (?, ?, 'enc', 'iv', 'tag', 'healthy', 1)
+      `).run(platform, `bulk-disable-${platform}`);
+    }
+
+    try {
+      recordModelFailure(targetIds[0], 'model_unavailable', 'Provider model unavailable');
+      recordModelFailure(targetIds[1], 'rate_limit', 'Provider rate limit');
+
+      const { status, body } = await request(app, 'POST', '/api/fallback/quarantined/disable');
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ success: true, disabledCount: 2 });
+      expect([...body.modelDbIds].sort((a, b) => a - b)).toEqual([...targetIds].sort((a, b) => a - b));
+
+      const { body: after } = await request(app, 'GET', '/api/fallback');
+      for (const modelDbId of targetIds) {
+        const entry = after.find((item: any) => item.modelDbId === modelDbId);
+        expect(entry.enabled).toBe(false);
+        expect(entry.runtimeStatus).not.toBe('healthy');
+      }
+      expect(after.find((entry: any) => entry.modelDbId === untouched.modelDbId).enabled).toBe(true);
+    } finally {
+      for (const modelDbId of targetIds) {
+        await request(app, 'PATCH', `/api/fallback/${modelDbId}`, { enabled: true });
+      }
+      for (const platform of targetPlatforms) {
+        getDb().prepare('DELETE FROM api_keys WHERE platform = ? AND label = ?').run(platform, `bulk-disable-${platform}`);
+      }
+    }
+  });
+
   it('GET /api/fallback/token-usage multiplies model budget by routable key count', async () => {
     await request(app, 'POST', '/api/keys', {
       platform: 'google',

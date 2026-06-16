@@ -1,37 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 220" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
   <title id="title">LLM Hub</title>
-  <desc id="desc">A routing hub mark with connected model nodes and the LLM Hub wordmark.</desc>
+  <desc id="desc">Compact LLM Hub favicon mark.</desc>
   <defs>
-    <linearGradient id="hub-accent" x1="34" y1="28" x2="182" y2="178" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#67E8F9"/>
-      <stop offset="0.52" stop-color="#22C55E"/>
-      <stop offset="1" stop-color="#84CC16"/>
+    <linearGradient id="fav-shell" x1="13" y1="9" x2="51" y2="55" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5cf56e"/>
+      <stop offset=".56" stop-color="#22c55e"/>
+      <stop offset="1" stop-color="#44e8ee"/>
     </linearGradient>
-    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#020617" flood-opacity="0.38"/>
-    </filter>
+    <linearGradient id="fav-core" x1="24" y1="22" x2="40" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#68f56b"/>
+      <stop offset="1" stop-color="#32d9dd"/>
+    </linearGradient>
   </defs>
 
-  <g filter="url(#soft-shadow)">
-    <rect x="20" y="20" width="180" height="180" rx="34" fill="#0B1120"/>
-    <rect x="21" y="21" width="178" height="178" rx="33" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="2"/>
-    <path d="M67 82H118L153 53" fill="none" stroke="url(#hub-accent)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M67 138H118L153 167" fill="none" stroke="url(#hub-accent)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M88 110H156" fill="none" stroke="url(#hub-accent)" stroke-width="12" stroke-linecap="round"/>
-    <circle cx="67" cy="82" r="18" fill="#101A2E" stroke="#67E8F9" stroke-width="8"/>
-    <circle cx="67" cy="138" r="18" fill="#101A2E" stroke="#22C55E" stroke-width="8"/>
-    <circle cx="88" cy="110" r="20" fill="#101A2E" stroke="#F8FAFC" stroke-opacity="0.82" stroke-width="8"/>
-    <circle cx="156" cy="110" r="23" fill="#22C55E"/>
-    <circle cx="156" cy="110" r="10" fill="#0B1120"/>
-    <circle cx="153" cy="53" r="13" fill="#67E8F9"/>
-    <circle cx="153" cy="167" r="13" fill="#84CC16"/>
-  </g>
+  <rect width="64" height="64" rx="14" fill="#070b14"/>
+  <path d="M32 8 52 19.5v25L32 56 12 44.5v-25Z" fill="#0a101a" stroke="#172235" stroke-width="1.5"/>
+  <path d="M32 8 52 19.5v25" fill="none" stroke="url(#fav-shell)" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M52 44.5 32 56 12 44.5v-25L32 8" fill="none" stroke="url(#fav-shell)" stroke-width="3.5" stroke-linecap="round"/>
 
-  <g fill="#F8FAFC">
-    <text x="238" y="106" font-family="Inter, Geist, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="64" font-weight="760" letter-spacing="0">LLM</text>
-    <text x="238" y="164" font-family="Inter, Geist, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="64" font-weight="760" letter-spacing="0">Hub</text>
+  <path d="M32 32 21.5 25.8M32 32l10.5-6.2M32 32 21.5 38.2M32 32l10.5 6.2" fill="none" stroke="#f8fafc" stroke-width="3" stroke-linecap="round"/>
+  <path d="M32 19.5v8M32 36.5v8M21.5 25.8v7M42.5 25.8v7" fill="none" stroke="#43e5e9" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 4"/>
+
+  <circle cx="32" cy="32" r="6" fill="url(#fav-core)"/>
+  <circle cx="32" cy="32" r="2.8" fill="#070b14"/>
+
+  <g fill="#101826" stroke="#f8fafc" stroke-width="2.6">
+    <path d="M32 15.5 35.8 17.7v4.4L32 24.3l-3.8-2.2v-4.4Z"/>
+    <path d="M18.8 23.2 22.6 25.4v4.4L18.8 32l-3.8-2.2v-4.4Z"/>
+    <path d="M45.2 23.2 49 25.4v4.4L45.2 32l-3.8-2.2v-4.4Z"/>
+    <path d="M18.8 34.7 22.6 36.9v4.4l-3.8 2.2-3.8-2.2v-4.4Z"/>
+    <path d="M45.2 34.7 49 36.9v4.4l-3.8 2.2-3.8-2.2v-4.4Z"/>
+    <path d="M32 41.7l3.8 2.2v4.4L32 50.5l-3.8-2.2v-4.4Z"/>
   </g>
-  <path d="M426 134H642" stroke="#334155" stroke-width="2" stroke-linecap="round"/>
-  <path d="M426 134H532" stroke="#22C55E" stroke-width="2" stroke-linecap="round"/>
-  <text x="426" y="112" fill="#94A3B8" font-family="Geist Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" font-weight="600" letter-spacing="3">MODEL ROUTER</text>
 </svg>

@@ -5,6 +5,7 @@ export type PlaygroundCapabilityMode =
   | 'gemini_generate'
   | 'gemini_stream'
   | 'vision'
+  | 'video'
   | 'embeddings'
   | 'image_generation'
   | 'image_edit'
@@ -15,6 +16,25 @@ export type PlaygroundCapabilityMode =
   | 'realtime';
 
 export type PlaygroundRequestKind = 'json' | 'multipart' | 'binary';
+
+export type PlaygroundRouteCapability =
+  | 'chat'
+  | 'embeddings'
+  | 'vision'
+  | 'video'
+  | 'image_generation'
+  | 'image_edit'
+  | 'image_variation'
+  | 'speech'
+  | 'transcription'
+  | 'translation'
+  | 'realtime_audio';
+
+export interface PlaygroundModelCapabilityOption {
+  enabled?: boolean;
+  keyCount?: number;
+  capabilities?: readonly string[];
+}
 
 export interface PlaygroundModeDefinition {
   id: PlaygroundCapabilityMode;
@@ -50,6 +70,13 @@ export const PLAYGROUND_MODES: PlaygroundModeDefinition[] = [
     id: 'vision',
     capability: 'vision',
     label: 'Vision',
+    endpoint: '/v1/chat/completions',
+    requestKind: 'json',
+  },
+  {
+    id: 'video',
+    capability: 'video',
+    label: 'Video',
     endpoint: '/v1/chat/completions',
     requestKind: 'json',
   },
@@ -115,6 +142,47 @@ export function getPlaygroundMode(mode: PlaygroundCapabilityMode): PlaygroundMod
   const definition = PLAYGROUND_MODES.find(item => item.id === mode);
   if (!definition) throw new Error(`Unknown playground mode: ${mode}`);
   return definition;
+}
+
+export function getPlaygroundRouteCapability(mode: PlaygroundCapabilityMode): PlaygroundRouteCapability {
+  switch (mode) {
+    case 'embeddings':
+      return 'embeddings';
+    case 'vision':
+      return 'vision';
+    case 'video':
+      return 'video';
+    case 'image_generation':
+      return 'image_generation';
+    case 'image_edit':
+      return 'image_edit';
+    case 'image_variation':
+      return 'image_variation';
+    case 'speech':
+      return 'speech';
+    case 'transcription':
+      return 'transcription';
+    case 'translation':
+      return 'translation';
+    case 'realtime':
+      return 'realtime_audio';
+    case 'chat':
+    case 'gemini_generate':
+    case 'gemini_stream':
+      return 'chat';
+  }
+}
+
+export function filterPlaygroundModelsForMode<T extends PlaygroundModelCapabilityOption>(
+  models: readonly T[],
+  mode: PlaygroundCapabilityMode,
+): T[] {
+  const capability = getPlaygroundRouteCapability(mode);
+  return models.filter(model => {
+    if (model.enabled === false) return false;
+    if ((model.keyCount ?? 1) <= 0) return false;
+    return model.capabilities?.includes(capability) === true;
+  });
 }
 
 export function getConfiguredProviderCount(response: CapabilitiesResponse | undefined, mode: PlaygroundCapabilityMode): number {

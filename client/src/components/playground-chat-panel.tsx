@@ -11,6 +11,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  Video,
   Volume2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -24,6 +25,7 @@ import { RealtimeSessionPanel } from '@/components/realtime-session-panel'
 import { cn } from '@/lib/utils'
 import {
   getConfiguredProviderCount,
+  filterPlaygroundModelsForMode,
   getPlaygroundMode,
   getSupportedModelCount,
   isPlaygroundModeConfigured,
@@ -77,6 +79,7 @@ const CHAT_ACTIONS: Array<{
 }> = [
   { id: 'chat', label: 'Chat', icon: MessageSquare, helper: 'Send text through the fallback chain.' },
   { id: 'vision', label: 'Vision', icon: ImageIcon, helper: 'Ask about an image URL, data URL, or local image.' },
+  { id: 'video', label: 'Video', icon: Video, helper: 'Ask about a video URL or data URL.' },
   { id: 'embeddings', label: 'Embeddings', icon: Sparkles, helper: 'Generate an embedding summary for text.' },
   { id: 'image_generation', label: 'Image', icon: ImageIcon, helper: 'Generate an image from the prompt.' },
   { id: 'image_edit', label: 'Edit image', icon: Upload, helper: 'Upload an image and prompt an edit.' },
@@ -190,6 +193,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
   const [selectedModel, setSelectedModel] = useState('auto')
   const [input, setInput] = useState('Explain what this LLM-Hub proxy can do in two short sentences.')
   const [imageUrl, setImageUrl] = useState('')
+  const [videoUrl, setVideoUrl] = useState('')
   const [visionFileName, setVisionFileName] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [maskFile, setMaskFile] = useState<File | null>(null)
@@ -205,9 +209,13 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
 
   const activeAction = CHAT_ACTIONS.find(item => item.id === action) ?? CHAT_ACTIONS[0]
   const activeDefinition = getPlaygroundMode(action)
-  const modelOptions = action === 'realtime' ? realtimeModels : models
+  const baseModelOptions = action === 'realtime' ? realtimeModels : models
+  const modelOptions = useMemo(
+    () => filterPlaygroundModelsForMode(baseModelOptions, action),
+    [action, baseModelOptions],
+  )
   const activeModelLabel = selectedModel === 'auto'
-    ? 'Auto (fallback chain)'
+    ? action === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${activeAction.label} route)`
     : modelOptions.find(model => model.modelId === selectedModel)?.displayName ?? selectedModel
 
   const history = useMemo(() => {
@@ -250,8 +258,9 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
 
     setBusy(true)
     try {
-      if (action === 'chat') await runChat(false)
-      else if (action === 'vision') await runChat(true)
+      if (action === 'chat') await runChat('chat')
+      else if (action === 'vision') await runChat('vision')
+      else if (action === 'video') await runChat('video')
       else if (action === 'embeddings') await runEmbeddings()
       else if (action === 'image_generation') await runImageGeneration()
       else if (action === 'image_edit') await runImageEdit()
@@ -270,10 +279,13 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
     }
   }
 
-  async function runChat(withVision: boolean) {
+  async function runChat(kind: 'chat' | 'vision' | 'video') {
     const text = input.trim()
+    const withVision = kind === 'vision'
+    const withVideo = kind === 'video'
     if (!text) throw new Error('Enter a message.')
     if (withVision && !imageUrl.trim()) throw new Error('Provide an image URL, data URL, or local image file.')
+    if (withVideo && !videoUrl.trim()) throw new Error('Provide a YouTube, direct video, or data:video/...;base64,... URL.')
 
     const userMessage: ChatMessageItem = {
       id: nextId(),
@@ -294,6 +306,14 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
               { type: 'image_url', image_url: { url: imageUrl.trim() } },
             ],
           }
+        : withVideo
+          ? {
+              role: 'user',
+              content: [
+                { type: 'text', text },
+                { type: 'video_url', video_url: { url: videoUrl.trim() } },
+              ],
+            }
         : { role: 'user', content: text },
     ]
 
@@ -588,7 +608,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="auto">
-                  {action === 'realtime' ? 'Auto (verified realtime default)' : 'Auto (fallback chain)'}
+                  {action === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${activeAction.label} route)`}
                 </SelectItem>
                 {modelOptions.map(model => (
                   <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
@@ -652,6 +672,18 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
                   className="font-mono text-xs"
                 />
               </div>
+            </div>
+          )}
+
+          {action === 'video' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Video URL</Label>
+              <Input
+                value={videoUrl}
+                onChange={event => setVideoUrl(event.target.value)}
+                placeholder="YouTube, https://.../clip.mp4, or data:video/mp4;base64,..."
+                className="font-mono text-xs"
+              />
             </div>
           )}
 

@@ -105,7 +105,7 @@ export default function DashboardHomePage() {
   })
 
   const providers = capabilityData?.providers ?? []
-  const capabilities = capabilityData?.capabilities ?? (['chat', 'embeddings', 'vision', 'images', 'audio'] as const)
+  const capabilities = capabilityData?.capabilities ?? (['chat', 'embeddings', 'vision', 'video', 'images', 'audio'] as const)
 
   const overview = (() => {
     const keyCount = providers.reduce((acc, provider) => acc + provider.keyCount, 0)
@@ -282,7 +282,7 @@ export default function DashboardHomePage() {
             Capability support across configured providers.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           {capabilities.map(capability => {
             const configured = providers.reduce((count, provider) => {
               const bucket = provider.capabilities[capability]

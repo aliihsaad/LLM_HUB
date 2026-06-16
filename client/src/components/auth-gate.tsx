@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, LockKeyhole } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
-import llmHubLogo from '../../../repo-assets/LLM-HUB.svg'
+import llmHubLogo from '../../../repo-assets/LLM-HUB (1).svg'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -32,7 +32,7 @@ function AuthShell({
         <div className="pointer-events-none absolute -bottom-24 right-8 h-48 w-48 rounded-full bg-sky-400/10 blur-3xl" />
         <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-sm flex-col justify-center">
         <div className="mb-5 flex items-center">
-          <img src={llmHubLogo} alt="LLM Hub" className="h-24 w-80 shrink-0 object-contain object-left" />
+          <img src={llmHubLogo} alt="LLM Hub" className="h-32 w-72 shrink-0 object-contain object-center" />
         </div>
         <Card className="rounded-lg">
           <CardHeader>

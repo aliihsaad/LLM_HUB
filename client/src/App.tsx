@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import llmHubLogo from '../../repo-assets/LLM-HUB.svg'
+import llmHubLogo from '../../repo-assets/LLM-HUB (1).svg'
 import DashboardHomePage from '@/pages/DashboardHomePage'
 import AnalyticsPage from '@/pages/AnalyticsPage'
 import CapabilitiesPage from '@/pages/CapabilitiesPage'
@@ -128,11 +128,11 @@ function pageTitle(pathname: string) {
 
 function Brand() {
   return (
-    <div className="flex w-full min-w-0 items-center">
+    <div className="flex w-full min-w-0 items-center justify-center">
       <img
         src={llmHubLogo}
         alt="LLM Hub"
-        className="h-20 min-w-0 w-full max-w-[15rem] shrink-0 object-contain object-left"
+        className="h-32 min-w-0 w-full max-w-[13rem] shrink-0 object-contain object-center"
       />
     </div>
   )

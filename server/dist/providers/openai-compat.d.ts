@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatCompletionResponse, ChatCompletionChunk, AudioTextResult, AudioTranscriptionRequest, AudioTranslationRequest, EmbeddingInput, EmbeddingOptions, EmbeddingResponse, ImageEditRequest, ImageGenerationRequest, ImagesResponse, ImageVariationRequest, Platform } from 'llmhub-shared/types.js';
+import type { ChatMessage, ChatCompletionResponse, ChatCompletionChunk, AudioTextResult, AudioTranscriptionRequest, AudioTranslationRequest, EmbeddingInput, EmbeddingOptions, EmbeddingResponse, ImageEditRequest, ImageGenerationRequest, ImagesResponse, ImageVariationRequest, Platform, SpeechRequest, SpeechResult } from 'llmhub-shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 /**
  * Generic provider for platforms that use an OpenAI-compatible API.
@@ -30,6 +30,7 @@ export declare class OpenAICompatProvider extends BaseProvider {
     createImageVariation(apiKey: string, request: ImageVariationRequest, modelId: string): Promise<ImagesResponse>;
     transcribeAudio(apiKey: string, request: AudioTranscriptionRequest, modelId: string): Promise<AudioTextResult>;
     translateAudio(apiKey: string, request: AudioTranslationRequest, modelId: string): Promise<AudioTextResult>;
+    createSpeech(apiKey: string, request: SpeechRequest, modelId: string): Promise<SpeechResult>;
     validateKey(apiKey: string): Promise<boolean>;
     private forwardAudioText;
     private createOpenRouterImage;

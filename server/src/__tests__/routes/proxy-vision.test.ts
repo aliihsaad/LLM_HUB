@@ -98,6 +98,58 @@ describe('Vision chat proxy route', () => {
     expect(body.choices[0].message.content).toContain('red dot');
   });
 
+  it('routes explicit OpenRouter free vision models without converting image content arrays', async () => {
+    await request(app, 'POST', '/api/keys', {
+      platform: 'openrouter',
+      key: 'or_vision_test_key',
+      label: 'openrouter vision',
+    });
+
+    const origFetch = global.fetch;
+    let providerBody: any = null;
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Describe this image.' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+      ],
+    }];
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr === 'https://openrouter.ai/api/v1/chat/completions') {
+        providerBody = JSON.parse((init as any).body);
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'or-vision-test',
+            object: 'chat.completion',
+            created: 1,
+            model: 'nex-agi/nex-n2-pro:free',
+            choices: [{
+              index: 0,
+              message: { role: 'assistant', content: 'The image was accepted by OpenRouter.' },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 12, completion_tokens: 7, total_tokens: 19 },
+          }),
+        } as any;
+      }
+      return origFetch(url, init);
+    });
+
+    const { status, body, headers } = await request(app, 'POST', '/v1/chat/completions', {
+      model: 'nex-agi/nex-n2-pro:free',
+      messages,
+    });
+
+    expect(status).toBe(200);
+    expect(headers.get('X-Routed-Via')).toBe('openrouter/nex-agi/nex-n2-pro:free');
+    expect(providerBody.model).toBe('nex-agi/nex-n2-pro:free');
+    expect(providerBody.messages).toEqual(messages);
+    expect(body.choices[0].message.content).toContain('OpenRouter');
+  });
+
   it('accepts local-image sized data URLs larger than the old 1mb JSON limit', async () => {
     await request(app, 'POST', '/api/keys', {
       platform: 'google',

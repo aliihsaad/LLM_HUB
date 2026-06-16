@@ -42,7 +42,7 @@ export interface Model {
   enabled: boolean;
 }
 
-export type ModelCapability = 'chat' | 'embeddings' | 'vision' | 'images' | 'audio';
+export type ModelCapability = 'chat' | 'embeddings' | 'vision' | 'video' | 'images' | 'audio';
 
 export interface CapabilityLight {
   supportedModels: number;
@@ -199,7 +199,14 @@ export interface ChatImageUrlContentPart {
   };
 }
 
-export type ChatContentPart = ChatTextContentPart | ChatImageUrlContentPart;
+export interface ChatVideoUrlContentPart {
+  type: 'video_url';
+  video_url: {
+    url: string;
+  };
+}
+
+export type ChatContentPart = ChatTextContentPart | ChatImageUrlContentPart | ChatVideoUrlContentPart;
 export type ChatMessageContent = string | ChatContentPart[] | null;
 
 export interface ChatMessage {

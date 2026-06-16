@@ -17,6 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { PowerOff } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -113,6 +114,16 @@ function formatRuntimeStatus(entry: FallbackEntry): string | null {
   return 'Degraded'
 }
 
+function isQuarantined(entry: FallbackEntry): boolean {
+  return entry.runtimeStatus !== 'healthy' || !!entry.runtimeBlockedUntil || !!entry.lastErrorCategory
+}
+
+function turnOffQuarantined(entries: FallbackEntry[]): FallbackEntry[] {
+  return entries.map(entry =>
+    entry.keyCount > 0 && isQuarantined(entry) ? { ...entry, enabled: false } : entry
+  )
+}
+
 function formatHealthReason(entry: FallbackEntry): string {
   if (entry.lastErrorCategory === 'zero_quota') return 'zero quota'
   if (entry.lastErrorCategory) return entry.lastErrorCategory.replace('_', ' ')
@@ -199,19 +210,22 @@ function ModelHealthPanel({
   entries,
   onRetry,
   onEnable,
+  onTurnOffAll,
   retryingId,
   toggling,
+  turningOffAll,
 }: {
   entries: FallbackEntry[]
   onRetry: (entry: FallbackEntry) => void
   onEnable: (modelDbId: number) => void
+  onTurnOffAll: () => void
   retryingId: number | null
   toggling: boolean
+  turningOffAll: boolean
 }) {
   const routableEntries = entries.filter(entry => entry.keyCount > 0)
-  const quarantined = routableEntries.filter(entry =>
-    entry.runtimeStatus !== 'healthy' || entry.runtimeBlockedUntil || entry.lastErrorCategory,
-  )
+  const quarantined = routableEntries.filter(isQuarantined)
+  const enabledQuarantinedCount = quarantined.filter(entry => entry.enabled).length
   const manuallyDisabled = routableEntries.filter(entry =>
     !entry.enabled && !quarantined.some(item => item.modelDbId === entry.modelDbId),
   )
@@ -225,7 +239,20 @@ function ModelHealthPanel({
       </CardHeader>
       <CardContent>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div />
+          <div>
+            {quarantined.length > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={onTurnOffAll}
+                disabled={turningOffAll || enabledQuarantinedCount === 0}
+                title={enabledQuarantinedCount === 0 ? 'All quarantined models are already off' : 'Turn off all quarantined models'}
+              >
+                <PowerOff data-icon="inline-start" />
+                {turningOffAll ? 'Turning off…' : 'Turn off all'}
+              </Button>
+            )}
+          </div>
           <div className="flex gap-2 text-xs tabular-nums">
             <span className="rounded-full border px-2 py-1">{quarantined.length} quarantined</span>
             <span className="rounded-full border px-2 py-1">{manuallyDisabled.length} manual off</span>
@@ -615,6 +642,18 @@ export default function FallbackPage() {
     },
   })
 
+  const disableQuarantinedMutation = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/fallback/quarantined/disable', { method: 'POST' }),
+    onSuccess: () => {
+      setLocalEntries(current => current ? turnOffQuarantined(current) : current)
+      queryClient.invalidateQueries({ queryKey: ['fallback'] })
+    },
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: ['fallback'] })
+    },
+  })
+
   const sortMutation = useMutation({
     mutationFn: (preset: string) =>
       apiFetch(`/api/fallback/sort/${preset}`, { method: 'POST' }),
@@ -686,6 +725,10 @@ export default function FallbackPage() {
         : e)
     )
     retryMutation.mutate({ modelDbId, confirm: entry.requiresConfirmation })
+  }
+
+  function handleTurnOffAllQuarantined() {
+    disableQuarantinedMutation.mutate()
   }
 
   function handleSave() {
@@ -787,8 +830,10 @@ export default function FallbackPage() {
                 entries={allEntries}
                 onRetry={handleRetry}
                 onEnable={(modelDbId) => handleToggle(modelDbId, true)}
+                onTurnOffAll={handleTurnOffAllQuarantined}
                 retryingId={retryingId}
                 toggling={toggleMutation.isPending}
+                turningOffAll={disableQuarantinedMutation.isPending}
               />
             ) : isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>

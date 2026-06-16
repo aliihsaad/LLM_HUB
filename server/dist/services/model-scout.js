@@ -21,6 +21,23 @@ const GOOGLE_FREE_CHAT_MODELS = new Map([
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
     ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite'],
 ]);
+function isZeroPrice(value) {
+    if (value == null)
+        return false;
+    return Number(value) === 0;
+}
+function supportsImageInput(entry) {
+    const inputModalities = entry.architecture?.input_modalities ?? [];
+    if (inputModalities.some(modality => modality.toLowerCase() === 'image'))
+        return true;
+    return entry.architecture?.modality?.toLowerCase().includes('image') === true;
+}
+function supportsVideoInput(entry) {
+    const inputModalities = entry.architecture?.input_modalities ?? [];
+    if (inputModalities.some(modality => modality.toLowerCase() === 'video'))
+        return true;
+    return entry.architecture?.modality?.toLowerCase().includes('video') === true;
+}
 async function discoverGoogleModels(apiKey, knownSet) {
     const res = await fetch(`${GOOGLE_MODELS_API_BASE}/models?key=${encodeURIComponent(apiKey)}`);
     if (!res.ok)
@@ -41,6 +58,7 @@ async function discoverGoogleModels(apiKey, knownSet) {
             modelId,
             displayName: entry.displayName ?? displayName,
             enabledByDefault: true,
+            capabilities: ['chat', 'vision', 'video'],
         });
     }
     return discoveries;
@@ -244,15 +262,24 @@ export async function discoverNewModels() {
                 // Heuristic: explicit free models become routable immediately. Credit-
                 // based/trial providers are persisted disabled so the catalog stays
                 // current without silently routing into paid-only models.
-                const isLikelyFree = /:free|free-tier|free model|trial|sandbox/i.test(`${entry.id} ${entry.name ?? ''}`);
+                const hasZeroPricing = platform === 'openrouter' && isZeroPrice(entry.pricing?.prompt) && isZeroPrice(entry.pricing?.completion);
+                const isLikelyFree = /:free|free-tier|free model|trial|sandbox/i.test(`${entry.id} ${entry.name ?? ''}`) || hasZeroPricing;
                 const shouldPersist = isLikelyFree || CATALOG_SYNC_PLATFORMS.has(platform);
                 if (!shouldPersist)
                     continue;
+                const capabilities = ['chat'];
+                if (platform === 'openrouter' && supportsImageInput(entry)) {
+                    capabilities.push('vision');
+                }
+                if (platform === 'openrouter' && supportsVideoInput(entry)) {
+                    capabilities.push('video');
+                }
                 discoveries.push({
                     platform: platform,
                     modelId: entry.id,
                     displayName: entry.name ?? entry.id,
                     enabledByDefault: isLikelyFree,
+                    capabilities,
                 });
                 discoveredForPlatform++;
                 if (discoveredForPlatform >= MAX_DISCOVERED_PER_PLATFORM)
@@ -306,9 +333,9 @@ export async function discoverAndPersistNewModels() {
     INSERT INTO model_availability (model_db_id, status, discovery_source, free_tier_confirmed)
     VALUES (?, 'unknown', ?, ?)
   `);
-    const addToCategory = db.prepare(`
+    const addCapability = db.prepare(`
     INSERT OR IGNORE INTO model_capabilities (model_db_id, capability, priority, enabled)
-    VALUES (?, 'chat', 999, ?)
+    VALUES (?, ?, 999, ?)
   `);
     const getModelId = db.prepare(`
     SELECT id FROM models WHERE platform = ? AND model_id = ?
@@ -338,9 +365,11 @@ export async function discoverAndPersistNewModels() {
             updateCategory.run(categorize.category, categorize.specializations.join(','), modelDbId);
             insertFallback.run(modelDbId, nextPriority++, enabled);
             insertAvailability.run(modelDbId, discoverySource, enabled);
-            // New discovered rows are assumed chat-capable by default so the model
-            // is included in standard routing unless edited explicitly.
-            addToCategory.run(modelDbId, enabled);
+            // New discovered rows are assumed chat-capable by default. Providers
+            // that expose modality metadata can add narrower capability routes too.
+            for (const capability of new Set(candidate.capabilities ?? ['chat'])) {
+                addCapability.run(modelDbId, capability, enabled);
+            }
             inserted.push(candidate);
             insertedModelIds.push(modelDbId);
         }

@@ -3,7 +3,7 @@ import { getDb } from '../db/index.js';
 import { hasProvider } from '../providers/index.js';
 import { getProviderMetadata, listProviderMetadata, PLATFORM_ORDER } from '../lib/provider-metadata.js';
 export const modelsRouter = Router();
-const CAPABILITIES = ['chat', 'embeddings', 'vision', 'images', 'audio'];
+const CAPABILITIES = ['chat', 'embeddings', 'vision', 'video', 'images', 'audio'];
 modelsRouter.get('/providers', (_req, res) => {
     const result = {
         providers: listProviderMetadata(),

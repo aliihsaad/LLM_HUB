@@ -91,6 +91,49 @@ describe('Audio speech proxy route', () => {
     expect(providerBody.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe('Kore');
   });
 
+  it('routes explicit Groq TTS requests to the OpenAI-compatible speech endpoint', async () => {
+    await request(app, 'POST', '/api/keys', {
+      platform: 'groq',
+      key: 'groq_tts_test_key',
+      label: 'tts',
+    });
+
+    const origFetch = global.fetch;
+    let providerBody: any = null;
+    const wavBytes = Buffer.from('RIFFgroq-wav');
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr === 'https://api.groq.com/openai/v1/audio/speech') {
+        providerBody = JSON.parse((init as any).body);
+        return {
+          ok: true,
+          headers: new Headers({ 'content-type': 'audio/wav' }),
+          arrayBuffer: () => Promise.resolve(wavBytes.buffer.slice(wavBytes.byteOffset, wavBytes.byteOffset + wavBytes.byteLength)),
+        } as any;
+      }
+      return origFetch(url, init);
+    });
+
+    const { status, body, headers } = await request(app, 'POST', '/v1/audio/speech', {
+      model: 'canopylabs/orpheus-v1-english',
+      input: 'Say hello from Groq.',
+      voice: 'alloy',
+      response_format: 'wav',
+    });
+
+    expect(status).toBe(200);
+    expect(headers.get('X-Routed-Via')).toBe('groq/canopylabs/orpheus-v1-english');
+    expect(headers.get('Content-Type')).toContain('audio/wav');
+    expect((body as Buffer).toString('ascii')).toBe('RIFFgroq-wav');
+    expect(providerBody).toEqual({
+      model: 'canopylabs/orpheus-v1-english',
+      input: 'Say hello from Groq.',
+      voice: 'austin',
+      response_format: 'wav',
+    });
+  });
+
   it('rejects an explicit non-audio model', async () => {
     const { status, body } = await request(app, 'POST', '/v1/audio/speech', {
       model: 'mistral-large-latest',

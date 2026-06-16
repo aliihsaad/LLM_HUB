@@ -1067,6 +1067,46 @@ function seedModelCapabilities(db: Database.Database) {
     ['openrouter', 'sourceful/riverflow-v2.5-pro', 'Sourceful Riverflow V2.5 Pro (OpenRouter)', 62, 5, 'Image', null, null, null, null, 'image', 0],
   ];
 
+  const openRouterVisionModels: Array<[
+    string,
+    string,
+    string,
+    number,
+    number,
+    string,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    string,
+    number | null,
+  ]> = [
+    ['openrouter', 'nex-agi/nex-n2-pro:free', 'Nex N2 Pro Vision (free)', 24, 9, 'Vision', 20, 200, null, null, '~6M', 131072],
+    ['openrouter', 'google/gemma-4-26b-a4b-it:free', 'Gemma 4 26B Vision (free)', 25, 9, 'Vision', 20, 200, null, null, '~6M', 262144],
+    ['openrouter', 'google/gemma-4-31b-it:free', 'Gemma 4 31B Vision (free)', 26, 9, 'Vision', 20, 200, null, null, '~6M', 262144],
+    ['openrouter', 'nvidia/nemotron-nano-12b-v2-vl:free', 'Nemotron Nano 12B VL (free)', 27, 9, 'Vision', 20, 200, null, null, '~6M', 131072],
+    ['openrouter', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'Nemotron 3 Nano Omni 30B (free)', 28, 9, 'Vision', 20, 200, null, null, '~6M', 262144],
+    ['openrouter', 'openrouter/free', 'OpenRouter Free Vision Router', 29, 9, 'Vision', 20, 200, null, null, '~6M', null],
+  ];
+
+  const openRouterVideoModels: Array<[
+    string,
+    string,
+    string,
+    number,
+    number,
+    string,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    string,
+    number | null,
+  ]> = [
+    ['openrouter', 'minimax/minimax-m3', 'MiniMax M3 Video (OpenRouter)', 35, 7, 'Video', null, null, null, null, 'video', 262144],
+    ['openrouter', 'stepfun/step-3.7-flash', 'Step 3.7 Flash Video (OpenRouter)', 36, 7, 'Video', null, null, null, null, 'video', 262144],
+  ];
+
   const audioModels: Array<[
     string,
     string,
@@ -1085,6 +1125,8 @@ function seedModelCapabilities(db: Database.Database) {
     ['google', 'gemini-3.1-flash-tts-preview', 'Gemini 3.1 Flash TTS Preview', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
     ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
     ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
+    ['groq', 'canopylabs/orpheus-v1-english', 'Orpheus TTS English (Groq)', 50, 2, 'Speech', null, null, null, null, 'audio', 0],
+    ['groq', 'canopylabs/orpheus-arabic-saudi', 'Orpheus TTS Arabic Saudi (Groq)', 51, 2, 'Speech', null, null, null, null, 'audio', 0],
     ['groq', 'whisper-large-v3-turbo', 'Whisper Large V3 Turbo (Groq)', 51, 4, 'Audio', null, null, null, null, 'audio', 0],
     ['groq', 'whisper-large-v3', 'Whisper Large V3 (Groq)', 52, 5, 'Audio', null, null, null, null, 'audio', 0],
   ];
@@ -1092,6 +1134,8 @@ function seedModelCapabilities(db: Database.Database) {
   const audioRouteCapabilities: Array<[string, string, string, number]> = [
     ['google', 'gemini-2.5-flash-preview-tts', 'speech', 1],
     ['google', 'gemini-3.1-flash-tts-preview', 'speech', 1],
+    ['groq', 'canopylabs/orpheus-v1-english', 'speech', 2],
+    ['groq', 'canopylabs/orpheus-arabic-saudi', 'speech', 3],
     ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'realtime_audio', 1],
     ['google', 'gemini-3.1-flash-live-preview', 'realtime_audio', 2],
     ['groq', 'whisper-large-v3-turbo', 'transcription', 1],
@@ -1154,6 +1198,7 @@ function seedModelCapabilities(db: Database.Database) {
 
     for (const model of visionModels) {
       addCapability.run(model.id, 'vision', model.intelligence_rank, model.enabled);
+      addCapability.run(model.id, 'video', model.intelligence_rank, model.enabled);
     }
 
     const fallbackBase = (maxFallbackPriority.get() as { mx: number }).mx;
@@ -1180,13 +1225,35 @@ function seedModelCapabilities(db: Database.Database) {
       }
     }
 
+    for (let i = 0; i < openRouterVisionModels.length; i++) {
+      const model = openRouterVisionModels[i];
+      insertCapabilityModel.run(...model);
+      const row = getModelId.get(model[0], model[1]) as { id: number } | undefined;
+      if (row) {
+        addCapability.run(row.id, 'chat', model[3], 1);
+        addCapability.run(row.id, 'vision', i + 1, 1);
+        addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + i + 1);
+      }
+    }
+
+    for (let i = 0; i < openRouterVideoModels.length; i++) {
+      const model = openRouterVideoModels[i];
+      insertCapabilityModel.run(...model);
+      const row = getModelId.get(model[0], model[1]) as { id: number } | undefined;
+      if (row) {
+        addCapability.run(row.id, 'chat', model[3], 1);
+        addCapability.run(row.id, 'video', i + 1, 1);
+        addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + i + 1);
+      }
+    }
+
     for (let i = 0; i < audioModels.length; i++) {
       const model = audioModels[i];
       insertCapabilityModel.run(...model);
       const row = getModelId.get(model[0], model[1]) as { id: number } | undefined;
       if (row) {
         addCapability.run(row.id, 'audio', i + 1, 1);
-        addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + i + 1);
+        addFallback.run(row.id, fallbackBase + embeddingModels.length + imageModels.length + openRouterVisionModels.length + openRouterVideoModels.length + i + 1);
       }
     }
 
