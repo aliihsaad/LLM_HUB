@@ -1884,6 +1884,18 @@ function estimateAudioTextTokens(request: AudioTranscriptionRequest | AudioTrans
   return Math.max(100, promptTokens + urlTokens + 100);
 }
 
+function realtimeWebSocketNotSupported(_req: Request, res: Response) {
+  res.status(400).json({
+    error: {
+      code: 'websocket_not_supported',
+      message: 'FreeLLMAPI does not proxy realtime WebSocket sessions. To use Gemini Live realtime, call POST /v1/realtime/sessions to mint a session token, then connect directly to the returned connect_url using the Gemini Live WebSocket protocol.',
+    },
+  });
+}
+
+proxyRouter.get('/realtime', realtimeWebSocketNotSupported);
+proxyRouter.post('/realtime', realtimeWebSocketNotSupported);
+
 proxyRouter.post('/realtime/sessions', async (req: Request, res: Response) => {
   const start = Date.now();
 
