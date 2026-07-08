@@ -5,14 +5,15 @@ import { startHealthChecker } from './services/health.js';
 import { startModelScout } from './services/model-scout.js';
 
 const PORT = process.env.PORT ?? 3001;
+const HOST = process.env.HOST ?? '127.0.0.1';
 
 async function main() {
   await initDb();
   const app = createApp();
 
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-    console.log(`Proxy endpoint: http://0.0.0.0:${PORT}/v1/chat/completions`);
+  app.listen(Number(PORT), HOST, () => {
+    console.log(`Server running on http://${HOST}:${PORT}`);
+    console.log(`Proxy endpoint: http://${HOST}:${PORT}/v1/chat/completions`);
     startHealthChecker();
     startModelScout();
   });
