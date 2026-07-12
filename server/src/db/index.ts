@@ -1146,6 +1146,7 @@ function seedModelCapabilities(db: Database.Database) {
     ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'realtime_audio', 1],
     ['google', 'gemini-3.1-flash-live-preview', 'realtime_audio', 2],
     ['groq', 'whisper-large-v3-turbo', 'transcription', 1],
+    ['google', 'gemini-2.5-flash', 'transcription', 2],
     ['groq', 'whisper-large-v3-turbo', 'translation', 1],
     ['groq', 'whisper-large-v3', 'transcription', 2],
     ['groq', 'whisper-large-v3', 'translation', 2],

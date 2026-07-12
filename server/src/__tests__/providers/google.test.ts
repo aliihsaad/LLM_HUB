@@ -556,6 +556,44 @@ describe('GoogleProvider', () => {
     expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-3.1-flash-image' });
   });
 
+  it('should transcribe uploaded audio through Gemini and return OpenAI-compatible JSON', async () => {
+    let capturedBody: any;
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          candidates: [{
+            content: { parts: [{ text: 'Turn on the office light.' }] },
+            finishReason: 'STOP',
+          }],
+        }),
+      } as any;
+    });
+
+    const audio = Buffer.from('fake-wave');
+    const result = await provider.transcribeAudio(
+      'test-key',
+      {
+        file: {
+          filename: 'utterance.wav',
+          contentType: 'audio/wav',
+          data: audio,
+        },
+        response_format: 'json',
+      },
+      'gemini-2.5-flash',
+    );
+
+    expect(capturedBody.contents[0].parts[0].text).toContain('Transcribe');
+    expect(capturedBody.contents[0].parts[1]).toEqual({
+      inlineData: { mimeType: 'audio/wav', data: audio.toString('base64') },
+    });
+    expect(result.body).toEqual({ text: 'Turn on the office light.' });
+    expect(result.contentType).toBe('application/json');
+    expect(result._routed_via).toEqual({ platform: 'google', model: 'gemini-2.5-flash' });
+  });
+
   it('should generate speech and return WAV audio bytes', async () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
