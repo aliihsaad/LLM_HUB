@@ -2,6 +2,7 @@ import { getDb } from '../db/index.js';
 import { getProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { categorizeModel } from './model-categorizer.js';
+import { isFreeOnlyMode } from '../lib/app-settings.js';
 import type { Platform } from 'llmhub-shared/types.js';
 
 const SCOUT_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
@@ -270,19 +271,26 @@ export async function checkModelAvailability(modelDbId: number): Promise<Availab
   }
 }
 
+/** Enabled models eligible for the availability sweep. Paid rows are skipped
+ *  while free-only mode is on so probes never spend key credit. */
+export function selectSweepCandidateIds(db: ReturnType<typeof getDb>): number[] {
+  const freeOnly = isFreeOnlyMode(db);
+  const rows = db.prepare(`
+    SELECT id FROM models WHERE enabled = 1 ${freeOnly ? 'AND is_free = 1' : ''}
+  `).all() as { id: number }[];
+  return rows.map(r => r.id);
+}
+
 /**
  * Check all enabled models in batches with delays to avoid rate limits.
  */
 export async function scoutAllModels(delayMs = 2000): Promise<AvailabilityCheck[]> {
   const db = getDb();
-  const models = db.prepare(`
-    SELECT id FROM models WHERE enabled = 1
-  `).all() as { id: number }[];
-
-  console.log(`[ModelScout] Checking ${models.length} models...`);
+  const ids = selectSweepCandidateIds(db);
+  console.log(`[ModelScout] Checking ${ids.length} models...`);
   const results: AvailabilityCheck[] = [];
 
-  for (const { id } of models) {
+  for (const id of ids) {
     try {
       const result = await checkModelAvailability(id);
       results.push(result);

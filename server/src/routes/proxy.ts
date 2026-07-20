@@ -835,10 +835,10 @@ async function handleGeminiGenerateContentRequest(
   }
   const db = getDb();
   const catalogRow = db.prepare(`
-    SELECT id, enabled, platform
+    SELECT id, enabled, platform, is_free
     FROM models
     WHERE model_id = ?
-  `).get(requestedModel) as { id: number; enabled: number; platform: string } | undefined;
+  `).get(requestedModel) as { id: number; enabled: number; platform: string; is_free: number } | undefined;
 
   if (!catalogRow || catalogRow.platform !== 'google') {
     res.status(400).json({
@@ -859,6 +859,15 @@ async function handleGeminiGenerateContentRequest(
         code: 'model_not_found',
       },
     });
+    return;
+  }
+
+  // Bridge free-tier-only enforcement into the Gemini-native compatibility
+  // path: this route resolves models straight from the catalog and never
+  // went through resolveRoutableModel(), so a paid Google model would
+  // otherwise slip past the same gate every other explicit-model block uses.
+  if (catalogRow.is_free !== 1 && isFreeOnlyMode(db)) {
+    sendResolutionError(res, requestedModel, { kind: 'paid_blocked' });
     return;
   }
 
