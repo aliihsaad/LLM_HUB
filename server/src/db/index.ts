@@ -50,6 +50,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   migrateModelsV13(db);
   migrateModelsV14(db);
   migrateModelsV15(db);
+  migrateModelsV16(db);
   seedModelCapabilities(db);
   ensureUnifiedKey(db);
 
@@ -1526,6 +1527,33 @@ function migrateModelsV15(db: Database.Database) {
   });
 
   apply();
+}
+
+/**
+ * V16 (July 2026): free-tier enforcement groundwork.
+ * Adds models.is_free (1 = free-tier, 0 = bills key credit) and flags the 12
+ * paid BazaarLink rows seeded by V15. `auto:free` and
+ * `deepseek/deepseek-v4-flash:free` stay free. Idempotent: the ALTER is
+ * guarded by PRAGMA table_info and the UPDATE re-applies harmlessly.
+ */
+function migrateModelsV16(db: Database.Database) {
+  const cols = db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
+  if (!cols.some(c => c.name === 'is_free')) {
+    db.prepare('ALTER TABLE models ADD COLUMN is_free INTEGER NOT NULL DEFAULT 1').run();
+  }
+
+  const paidBazaarlink = [
+    'claude-opus-4.7', 'gpt-5.5', 'claude-sonnet-4.6', 'gemini-3-flash-preview',
+    'gpt-5.4', 'kimi-k2.6', 'minimax-m3', 'glm-5.1', 'deepseek-v3.2',
+    'qwen3.6-plus', 'gpt-5.4-mini', 'claude-haiku-4.5',
+  ];
+  const flag = db.prepare(
+    "UPDATE models SET is_free = 0 WHERE platform = 'bazaarlink' AND model_id = ?",
+  );
+  const tx = db.transaction(() => {
+    for (const id of paidBazaarlink) flag.run(id);
+  });
+  tx();
 }
 
 function ensureUnifiedKey(db: Database.Database) {
