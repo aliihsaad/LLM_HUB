@@ -3,6 +3,8 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { getDb, initDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
+import { setFreeOnlyMode } from '../../lib/app-settings.js';
+import { listSweepTargets } from '../../services/model-sweeps.js';
 
 async function request(app: Express, method: string, path: string, body?: any) {
   const server = app.listen(0);
@@ -206,6 +208,32 @@ describe('Model sweep API', () => {
       runtimeStatus: 'unavailable',
       lastErrorCategory: 'zero_quota',
       requiresConfirmation: true,
+    });
+  });
+
+  describe('free-only gating on sweep targets', () => {
+    afterEach(() => {
+      // Restore the default so later tests/files see the pristine ON state.
+      setFreeOnlyMode(getDb(), true);
+    });
+
+    it('excludes paid rows from the sweep candidate list when free-only is ON and includes them when OFF', () => {
+      const db = getDb();
+      const freeModelDbId = addSweepModel('groq', 'free-sweep-model', 1);
+      const paidModelDbId = addSweepModel('openrouter', 'paid-sweep-model', 2);
+      db.prepare('UPDATE models SET is_free = 0 WHERE id = ?').run(paidModelDbId);
+      addKey('groq', 'gsk-test');
+      addKey('openrouter', 'sk-or-test');
+
+      setFreeOnlyMode(db, true);
+      const onIds = listSweepTargets().map(t => t.modelDbId);
+      expect(onIds).toContain(freeModelDbId);
+      expect(onIds).not.toContain(paidModelDbId);
+
+      setFreeOnlyMode(db, false);
+      const offIds = listSweepTargets().map(t => t.modelDbId);
+      expect(offIds).toContain(freeModelDbId);
+      expect(offIds).toContain(paidModelDbId);
     });
   });
 });
