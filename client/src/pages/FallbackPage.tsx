@@ -98,6 +98,7 @@ const platformColors: Record<string, string> = {
   pollinations: '#a855f7',
   llm7:        '#0ea5e9',
   huggingface: '#ff9d00',
+  bazaarlink:  '#6366f1',
 }
 
 function formatBudgetLabel(monthlyTokenBudget: string, keyCount: number, effectiveBudget: number): string {

@@ -93,8 +93,50 @@ describe('Models capabilities API', () => {
           docsUrl: 'https://docs.llm7.io/quickstart',
           keyUrl: 'https://token.llm7.io/',
         }),
+        expect.objectContaining({
+          platform: 'bazaarlink',
+          displayName: 'BazaarLink',
+          docsUrl: 'https://bazaarlink.ai',
+          keyUrl: 'https://bazaarlink.ai',
+        }),
       ]),
     );
+  });
+
+  it('seeds the BazaarLink catalog with chat capability and the free auto route', async () => {
+    const db = getDb();
+
+    const rows = db
+      .prepare(
+        `SELECT model_id, display_name, enabled, context_window
+           FROM models WHERE platform = 'bazaarlink' ORDER BY intelligence_rank ASC`,
+      )
+      .all() as { model_id: string; display_name: string; enabled: number; context_window: number | null }[];
+
+    // Live-probed July 2026: bare ids are canonical (aliases carry provider/model form).
+    expect(rows.length).toBeGreaterThanOrEqual(13);
+    const ids = rows.map(r => r.model_id);
+    expect(ids).toContain('auto:free');
+    expect(ids).toContain('claude-sonnet-4.6');
+    expect(ids).toContain('gpt-5.5');
+    expect(ids).toContain('glm-5.1');
+    for (const row of rows) expect(row.enabled).toBe(1);
+
+    const chatCapable = db
+      .prepare(
+        `SELECT COUNT(*) as n FROM model_capabilities mc
+           JOIN models m ON m.id = mc.model_db_id
+          WHERE m.platform = 'bazaarlink' AND mc.capability = 'chat' AND mc.enabled = 1`,
+      )
+      .get() as { n: number };
+    expect(chatCapable.n).toBeGreaterThanOrEqual(13);
+  });
+
+  it('registers BazaarLink as an OpenAI-compatible provider', async () => {
+    const { getProvider } = await import('../../providers/index.js');
+    const provider = getProvider('bazaarlink');
+    expect(provider).toBeDefined();
+    expect(provider!.name).toBe('BazaarLink');
   });
 
   it('marks Google vision as configured when Google keys are present', async () => {

@@ -49,6 +49,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   migrateModelsV12(db);
   migrateModelsV13(db);
   migrateModelsV14(db);
+  migrateModelsV15(db);
   seedModelCapabilities(db);
   ensureUnifiedKey(db);
 
@@ -1464,6 +1465,64 @@ function migrateModelsV14(db: Database.Database) {
     }
 
     syncFallbackEnabled.run();
+  });
+
+  apply();
+}
+
+/**
+ * V15 (July 2026):
+ * Add BazaarLink — OpenAI-compatible aggregator at https://bazaarlink.ai/api/v1.
+ * Keys start with sk-bl-; `auto:free` routes to zero-cost inference (4M
+ * tokens/day per account), every other catalog row bills the key's credit.
+ * All 13 rows live-probed 2026-07-20 against /api/v1/models: bare ids are
+ * canonical (`provider/model` aliases also resolve), context windows are the
+ * values the catalog reported. Rate-limit columns stay null — BazaarLink does
+ * not publish numeric RPM/TPM bounds.
+ */
+function migrateModelsV15(db: Database.Database) {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank, size_label,
+      rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window, enabled
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const bazaarlinkModels: Array<[
+    string, string, string, number, number, string,
+    number | null, number | null, number | null, number | null, string, number | null, number,
+  ]> = [
+    ['bazaarlink', 'auto:free',              'Auto Free (BZL)',          12, 7, 'Large',    null, null, null, null, '4M/day free',    null,    1],
+    ['bazaarlink', 'claude-opus-4.7',        'Claude Opus 4.7 (BZL)',     1, 9, 'Frontier', null, null, null, null, 'per-key credit', 1000000, 1],
+    ['bazaarlink', 'gpt-5.5',                'GPT-5.5 (BZL)',             1, 8, 'Frontier', null, null, null, null, 'per-key credit', 1050000, 1],
+    ['bazaarlink', 'claude-sonnet-4.6',      'Claude Sonnet 4.6 (BZL)',   2, 7, 'Frontier', null, null, null, null, 'per-key credit', 1000000, 1],
+    ['bazaarlink', 'gemini-3-flash-preview', 'Gemini 3 Flash (BZL)',      2, 5, 'Frontier', null, null, null, null, 'per-key credit', 1048576, 1],
+    ['bazaarlink', 'gpt-5.4',                'GPT-5.4 (BZL)',             3, 7, 'Frontier', null, null, null, null, 'per-key credit', 1050000, 1],
+    ['bazaarlink', 'kimi-k2.6',              'Kimi K2.6 (BZL)',           3, 8, 'Frontier', null, null, null, null, 'per-key credit', 262144,  1],
+    ['bazaarlink', 'minimax-m3',             'MiniMax M3 (BZL)',          3, 8, 'Frontier', null, null, null, null, 'per-key credit', 1048576, 1],
+    ['bazaarlink', 'glm-5.1',                'GLM 5.1 (BZL)',             4, 7, 'Frontier', null, null, null, null, 'per-key credit', 202752,  1],
+    ['bazaarlink', 'deepseek-v3.2',          'DeepSeek V3.2 (BZL)',       5, 7, 'Large',    null, null, null, null, 'per-key credit', 163840,  1],
+    ['bazaarlink', 'qwen3.6-plus',           'Qwen 3.6 Plus (BZL)',       6, 7, 'Large',    null, null, null, null, 'per-key credit', 1000000, 1],
+    ['bazaarlink', 'gpt-5.4-mini',           'GPT-5.4 Mini (BZL)',        8, 5, 'Medium',   null, null, null, null, 'per-key credit', 400000,  1],
+    ['bazaarlink', 'claude-haiku-4.5',       'Claude Haiku 4.5 (BZL)',   10, 4, 'Medium',   null, null, null, null, 'per-key credit', 200000,  1],
+  ];
+
+  const addFallback = db.prepare(`
+    INSERT OR IGNORE INTO fallback_config (model_db_id, priority, enabled)
+    VALUES (?, ?, ?)
+  `);
+  const getModel = db.prepare('SELECT id, enabled FROM models WHERE platform = ? AND model_id = ?');
+
+  const apply = db.transaction(() => {
+    for (const model of bazaarlinkModels) insert.run(...model);
+
+    const maxPriority = (db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get() as { mx: number }).mx;
+    let priority = maxPriority + 1;
+    for (const model of bazaarlinkModels) {
+      const row = getModel.get(model[0], model[1]) as { id: number; enabled: number } | undefined;
+      if (row) addFallback.run(row.id, priority++, row.enabled);
+    }
   });
 
   apply();

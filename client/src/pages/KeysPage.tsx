@@ -34,6 +34,7 @@ const FALLBACK_PROVIDERS: ProviderMetadata[] = [
   { platform: 'kilo', displayName: 'Kilo Gateway', docsUrl: '', apiBaseUrl: '', requiresKey: false },
   { platform: 'pollinations', displayName: 'Pollinations', docsUrl: '', apiBaseUrl: '', requiresKey: false },
   { platform: 'llm7', displayName: 'LLM7', docsUrl: '', apiBaseUrl: '', requiresKey: false },
+  { platform: 'bazaarlink', displayName: 'BazaarLink', docsUrl: '', apiBaseUrl: '', requiresKey: true },
 ]
 
 const statusDot: Record<string, string> = {
