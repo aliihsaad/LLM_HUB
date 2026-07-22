@@ -19,6 +19,13 @@ async function request(app: Express, method: string, path: string, body?: any) {
   return { status: res.status, body: data };
 }
 
+// Timestamps relative to "now" so fixtures always land inside the query's
+// range window regardless of the calendar date the suite runs on. Hardcoded
+// absolute dates silently aged out of the 30d window (created_at >= now-30d).
+function minutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60_000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 function insertRequest(row: {
   platform: string;
   modelId: string;
@@ -40,7 +47,7 @@ function insertRequest(row: {
     row.outputTokens ?? 0,
     row.latencyMs ?? 0,
     row.error ?? null,
-    row.createdAt ?? '2026-05-21 12:00:00',
+    row.createdAt ?? minutesAgo(60),
   );
 }
 
@@ -65,12 +72,12 @@ describe('Logs diagnostics API', () => {
     db.prepare("UPDATE api_keys SET status = 'healthy' WHERE platform IN ('google', 'groq')").run();
     db.prepare("UPDATE api_keys SET status = 'invalid' WHERE id = ?").run(mistralKey.id);
 
-    insertRequest({ platform: 'google', modelId: 'gemini-2.5-flash', status: 'success', inputTokens: 100, outputTokens: 50, latencyMs: 140, createdAt: '2026-05-21 12:00:00' });
-    insertRequest({ platform: 'google', modelId: 'gemini-2.5-flash', status: 'success', inputTokens: 80, outputTokens: 40, latencyMs: 160, createdAt: '2026-05-21 12:01:00' });
-    insertRequest({ platform: 'google', modelId: 'gemini-2.5-flash', status: 'error', latencyMs: 300, error: 'Google API error 429: quota exceeded', createdAt: '2026-05-21 12:02:00' });
-    insertRequest({ platform: 'groq', modelId: 'llama-3.3-70b-versatile', status: 'success', inputTokens: 120, outputTokens: 60, latencyMs: 80, createdAt: '2026-05-21 12:03:00' });
-    insertRequest({ platform: 'mistral', modelId: 'mistral-large-latest', status: 'error', latencyMs: 90, error: '401 invalid api key', createdAt: '2026-05-21 12:04:00' });
-    insertRequest({ platform: 'openrouter', modelId: 'openai/text-embedding-3-small', status: 'error', latencyMs: 10, error: 'All embeddings models exhausted. Add more API keys or wait for rate limits to reset.', createdAt: '2026-05-21 12:05:00' });
+    insertRequest({ platform: 'google', modelId: 'gemini-2.5-flash', status: 'success', inputTokens: 100, outputTokens: 50, latencyMs: 140, createdAt: minutesAgo(60) });
+    insertRequest({ platform: 'google', modelId: 'gemini-2.5-flash', status: 'success', inputTokens: 80, outputTokens: 40, latencyMs: 160, createdAt: minutesAgo(59) });
+    insertRequest({ platform: 'google', modelId: 'gemini-2.5-flash', status: 'error', latencyMs: 300, error: 'Google API error 429: quota exceeded', createdAt: minutesAgo(58) });
+    insertRequest({ platform: 'groq', modelId: 'llama-3.3-70b-versatile', status: 'success', inputTokens: 120, outputTokens: 60, latencyMs: 80, createdAt: minutesAgo(57) });
+    insertRequest({ platform: 'mistral', modelId: 'mistral-large-latest', status: 'error', latencyMs: 90, error: '401 invalid api key', createdAt: minutesAgo(56) });
+    insertRequest({ platform: 'openrouter', modelId: 'openai/text-embedding-3-small', status: 'error', latencyMs: 10, error: 'All embeddings models exhausted. Add more API keys or wait for rate limits to reset.', createdAt: minutesAgo(55) });
   });
 
   it('returns summary, diagnosis flags, provider rankings, and recent logs', async () => {
@@ -150,7 +157,7 @@ describe('Logs diagnostics API', () => {
         '* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-pro',
         'Please retry in 33.3s.',
       ].join('\n'),
-      createdAt: '2026-05-21 12:10:00',
+      createdAt: minutesAgo(50),
     });
 
     const { status, body } = await request(app, 'GET', '/api/logs?range=30d&status=error&platform=google&limit=1');
