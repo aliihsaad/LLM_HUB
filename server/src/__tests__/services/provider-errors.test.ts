@@ -16,6 +16,22 @@ describe('provider error classification', () => {
     expect(canRetryProviderFailure(failure, 'whisper-large-v3-turbo')).toBe(true);
   });
 
+  it('treats HTTP 410 Gone as a model-level unavailable error so routing moves on', () => {
+    const failure = classifyProviderError(
+      new Error('Ollama Cloud API error 410: Gone'),
+    );
+
+    expect(failure).toMatchObject({
+      category: 'model_unavailable',
+      retryable: true,
+      skipModel: true,
+    });
+    // auto-route: skip the retired model and continue down the chain
+    expect(canRetryProviderFailure(failure)).toBe(true);
+    // pinned request: fail honestly instead of silently switching models
+    expect(canRetryProviderFailure(failure, 'qwen3-coder:480b')).toBe(false);
+  });
+
   it('treats provider terms acceptance gates as model-level unavailable errors', () => {
     const failure = classifyProviderError(
       new Error('Groq API error 400: The model `canopylabs/orpheus-v1-english` requires terms acceptance. Please have the org admin accept the terms.'),

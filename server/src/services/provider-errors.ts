@@ -36,6 +36,7 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
 
   if (
     msg.includes('404')
+    || msg.includes('410')
     || msg.includes('not found')
     || msg.includes('model does not exist')
     || msg.includes('unavailable_model')
