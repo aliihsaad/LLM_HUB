@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, LogOut, ShieldCheck, ShieldOff, BookOpen, Save, Trash2, AlertTriangle } from 'lucide-react'
+import { KeyRound, LogOut, ShieldCheck, ShieldOff, BookOpen, Save, Trash2, AlertTriangle, Coins } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,6 +36,21 @@ export default function SettingsPage() {
   const { data: context7Data } = useQuery<Context7Config>({
     queryKey: ['settings', 'context7'],
     queryFn: () => apiFetch('/api/settings/context7'),
+  })
+
+  const { data: freeOnlyData } = useQuery<{ freeOnlyMode: boolean }>({
+    queryKey: ['settings', 'free-only-mode'],
+    queryFn: () => apiFetch('/api/settings/free-only-mode'),
+  })
+  const freeOnlyMode = freeOnlyData?.freeOnlyMode ?? true
+
+  const setFreeOnly = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch<{ freeOnlyMode: boolean }>('/api/settings/free-only-mode', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings', 'free-only-mode'] }),
   })
 
   const refreshAuth = () => {
@@ -103,11 +118,57 @@ export default function SettingsPage() {
 
   const pinEnabled = data?.pinEnabled ?? false
   const c7Configured = context7Data?.configured ?? false
-  const error = enablePin.error ?? changePin.error ?? disablePin.error ?? logout.error ?? saveContext7.error ?? removeContext7.error
+  const error = enablePin.error ?? changePin.error ?? disablePin.error ?? logout.error ?? saveContext7.error ?? removeContext7.error ?? setFreeOnly.error
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" description="Dashboard access controls and integrations." />
+      <PageHeader title="Settings" description="Dashboard access controls, routing policy, and integrations." />
+
+      {/* Free-tier only */}
+      <Card className="rounded-lg">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Coins className="size-5" />
+                Free-tier only
+              </CardTitle>
+              <div className="mt-2 flex items-center gap-2">
+                <Badge variant={freeOnlyMode ? 'default' : 'secondary'}>
+                  {freeOnlyMode ? 'On' : 'Off'}
+                </Badge>
+              </div>
+            </div>
+            <div className="flex size-9 items-center justify-center rounded-lg border bg-muted/40">
+              <Coins
+                className={`size-4 ${freeOnlyMode ? 'text-green-500' : 'text-muted-foreground'}`}
+                aria-hidden="true"
+              />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            When on, paid models are hidden from <code>/v1/models</code>, blocked from routing with{' '}
+            <code>403 paid_model_blocked</code>, and excluded from auto-routing, the fallback chain,
+            and the health sweep — so no request can spend paid credit. Turn it off to allow paid
+            models (they stay marked <span className="font-semibold text-amber-500">paid</span> in the
+            Playground). Default: on.
+          </p>
+          <Button
+            variant={freeOnlyMode ? 'outline' : 'default'}
+            onClick={() => setFreeOnly.mutate(!freeOnlyMode)}
+            disabled={setFreeOnly.isPending}
+          >
+            <Coins className="size-3.5" aria-hidden="true" />
+            {setFreeOnly.isPending
+              ? 'Saving...'
+              : freeOnlyMode
+                ? 'Allow paid models'
+                : 'Restrict to free tier'}
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Dashboard PIN */}
       <Card className="rounded-lg">
