@@ -13,12 +13,21 @@ describe('V16 free-tier migration', () => {
     initDb(':memory:');
   });
 
-  it('adds is_free defaulting to 1 for every non-bazaarlink row', () => {
+  it('adds is_free defaulting to 1 for rows no migration explicitly flags', () => {
     const db = getDb();
-    const other = db.prepare(
-      "SELECT COUNT(*) n FROM models WHERE platform != 'bazaarlink' AND is_free != 1",
-    ).get() as { n: number };
-    expect(other.n).toBe(0);
+    // V17 later flags a handful of paid Google rows, so this asserts the column
+    // DEFAULT rather than a blanket "everything non-bazaarlink is free".
+    const unflagged = db.prepare(`
+      SELECT COUNT(*) n FROM models
+       WHERE platform NOT IN ('bazaarlink', 'google')
+         AND is_free != 1
+    `).get() as { n: number };
+    expect(unflagged.n).toBe(0);
+
+    const knownFree = db.prepare(
+      "SELECT is_free FROM models WHERE platform = 'google' AND model_id = 'gemini-2.5-flash'",
+    ).get() as { is_free: number } | undefined;
+    expect(knownFree?.is_free).toBe(1);
   });
 
   it('flags exactly the 12 paid bazaarlink rows and keeps free routes free', () => {
