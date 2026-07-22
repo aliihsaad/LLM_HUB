@@ -53,6 +53,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   migrateModelsV16(db);
   migrateModelsV17(db);
   migrateModelsV18(db);
+  migrateModelsV19(db);
   seedModelCapabilities(db);
   // Must follow seedModelCapabilities — that is where the image rows are seeded.
   flagPaidGoogleModels(db);
@@ -1146,6 +1147,7 @@ function seedModelCapabilities(db: Database.Database) {
     ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'realtime_audio', 1],
     ['google', 'gemini-3.1-flash-live-preview', 'realtime_audio', 2],
     ['groq', 'whisper-large-v3-turbo', 'transcription', 1],
+    ['google', 'gemini-2.5-flash', 'transcription', 2],
     ['groq', 'whisper-large-v3-turbo', 'translation', 1],
     ['groq', 'whisper-large-v3', 'transcription', 2],
     ['groq', 'whisper-large-v3', 'translation', 2],
@@ -1693,6 +1695,22 @@ function migrateModelsV18(db: Database.Database) {
     "UPDATE models SET enabled = 0 WHERE platform = 'google' AND model_id IN ('gemma-4-31b-it', 'gemma-4-26b-a4b-it')",
   );
   disable.run();
+}
+
+/**
+ * V19 (July 2026): retire the Ollama Cloud rows the upstream deleted.
+ *
+ * Ollama Cloud answers `410 Gone` for qwen3-coder:480b — the hosted model was
+ * removed outright (live-verified 2026-07-22). With intelligence_rank 2 the
+ * row sat at the top of the auto-route chain, so before the 410 classifier
+ * fix every `model: "auto"` request died on it with a 502. Disabled, never
+ * deleted, per V18 precedent; a future migration can re-enable it if Ollama
+ * brings the model back.
+ */
+function migrateModelsV19(db: Database.Database) {
+  db.prepare(
+    "UPDATE models SET enabled = 0 WHERE platform = 'ollama' AND model_id = 'qwen3-coder:480b'",
+  ).run();
 }
 
 /**

@@ -542,6 +542,52 @@ export class GoogleProvider extends BaseProvider {
             _routed_via: { platform: 'google', model: modelId },
         };
     }
+    async transcribeAudio(apiKey, request, modelId) {
+        if (!request.file) {
+            throw new Error('Google transcription requires an uploaded audio file');
+        }
+        const instructions = [
+            'Transcribe the supplied audio exactly.',
+            'Return only the transcript without commentary, labels, quotation marks, or Markdown.',
+            request.language ? `The expected language code is ${request.language}.` : '',
+            request.prompt ? `Context that may help disambiguate names: ${request.prompt}` : '',
+        ].filter(Boolean).join(' ');
+        const body = {
+            contents: [{
+                    parts: [
+                        { text: instructions },
+                        {
+                            inlineData: {
+                                mimeType: request.file.contentType || 'audio/wav',
+                                data: Buffer.from(request.file.data).toString('base64'),
+                            },
+                        },
+                    ],
+                }],
+            generationConfig: { temperature: 0 },
+        };
+        const url = `${API_BASE}/models/${modelId}:generateContent?key=${apiKey}`;
+        const res = await this.fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        }, 120000);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(`Google API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+        }
+        const data = await res.json();
+        const transcript = extractText(data.candidates?.[0]?.content?.parts)?.trim();
+        if (!transcript) {
+            throw new Error('Google transcription returned no text');
+        }
+        const wantsText = request.response_format === 'text';
+        return {
+            body: wantsText ? transcript : { text: transcript },
+            contentType: wantsText ? 'text/plain; charset=utf-8' : 'application/json',
+            _routed_via: { platform: 'google', model: modelId },
+        };
+    }
     async createSpeech(apiKey, request, modelId) {
         const body = {
             contents: [{ parts: [{ text: toGeminiSpeechPrompt(request) }] }],

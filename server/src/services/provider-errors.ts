@@ -19,6 +19,13 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   }
 
   if (
+    msg.includes('organization has been restricted')
+    || msg.includes('organization is restricted')
+  ) {
+    return { category: 'auth', retryable: true, skipModel: false, keyCooldownMs: 24 * 60 * 60 * 1000 };
+  }
+
+  if (
     msg.includes('401')
     || msg.includes('unauthorized')
     || msg.includes('invalid api key')
@@ -29,6 +36,7 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
 
   if (
     msg.includes('404')
+    || msg.includes('410')
     || msg.includes('not found')
     || msg.includes('model does not exist')
     || msg.includes('unavailable_model')
