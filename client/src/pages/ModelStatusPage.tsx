@@ -31,6 +31,7 @@ interface DiscoverResult {
 
 export default function ModelStatusPage() {
   const [filter, setFilter] = useState<string>('all')
+  const [showDisabled, setShowDisabled] = useState(false)
 
   const { data, isLoading, isError, refetch, isRefetching, error } = useQuery<{
     models: ModelAvailability[]
@@ -40,7 +41,11 @@ export default function ModelStatusPage() {
     queryFn: () => apiFetch('/api/model-availability'),
   })
 
-  const models = data?.models ?? []
+  const allModels = data?.models ?? []
+  // Disabled models cannot be routed to and are never live-checked, so counting
+  // them as "unknown" only inflates the numbers. Hidden unless asked for.
+  const disabledCount = allModels.filter(m => !m.enabled).length
+  const models = showDisabled ? allModels : allModels.filter(m => m.enabled)
 
   const checkMutation = useMutation({
     mutationFn: () => apiFetch('/api/model-availability/check', { method: 'POST' }),
@@ -202,6 +207,16 @@ export default function ModelStatusPage() {
           <Rocket className={`size-3.5 mr-1.5 ${discoverMutation.isPending ? 'animate-pulse' : ''}`} />
           Discover new models
         </Button>
+        {disabledCount > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowDisabled(v => !v)}
+            title="Disabled models cannot be routed to and are never live-checked"
+          >
+            {showDisabled ? `Hide disabled (${disabledCount})` : `Show disabled (${disabledCount})`}
+          </Button>
+        )}
         {filter !== 'all' && (
           <Badge variant="secondary" className="cursor-pointer" onClick={() => setFilter('all')}>
             Showing: {filter} — click to clear
