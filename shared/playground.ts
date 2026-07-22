@@ -34,6 +34,7 @@ export interface PlaygroundModelCapabilityOption {
   enabled?: boolean;
   keyCount?: number;
   capabilities?: readonly string[];
+  isFree?: boolean;
 }
 
 export interface PlaygroundModeDefinition {
@@ -176,13 +177,44 @@ export function getPlaygroundRouteCapability(mode: PlaygroundCapabilityMode): Pl
 export function filterPlaygroundModelsForMode<T extends PlaygroundModelCapabilityOption>(
   models: readonly T[],
   mode: PlaygroundCapabilityMode,
+  options?: { freeOnly?: boolean },
 ): T[] {
   const capability = getPlaygroundRouteCapability(mode);
   return models.filter(model => {
     if (model.enabled === false) return false;
     if ((model.keyCount ?? 1) <= 0) return false;
+    // Free-only mode hides paid rows the proxy would 403 anyway. An untagged
+    // model (isFree === undefined) is treated as free — matches the DB default.
+    if (options?.freeOnly && model.isFree === false) return false;
     return model.capabilities?.includes(capability) === true;
   });
+}
+
+export interface PlaygroundProviderGroup<T> {
+  platform: string;
+  models: T[];
+}
+
+/**
+ * Group model selector options by their provider, sorted by platform id and then
+ * display name. Powers the Playground's provider → model picker so a flat list of
+ * hundreds of models becomes a browsable, provider-scoped choice.
+ */
+export function groupPlaygroundModelsByProvider<T extends { platform: string; displayName: string }>(
+  models: readonly T[],
+): PlaygroundProviderGroup<T>[] {
+  const groups = new Map<string, T[]>();
+  for (const model of models) {
+    const list = groups.get(model.platform);
+    if (list) list.push(model);
+    else groups.set(model.platform, [model]);
+  }
+  return Array.from(groups.entries())
+    .map(([platform, list]) => ({
+      platform,
+      models: [...list].sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    }))
+    .sort((a, b) => a.platform.localeCompare(b.platform));
 }
 
 export function getConfiguredProviderCount(response: CapabilitiesResponse | undefined, mode: PlaygroundCapabilityMode): number {

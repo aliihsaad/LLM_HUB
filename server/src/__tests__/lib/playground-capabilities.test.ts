@@ -6,6 +6,7 @@ import {
   getPlaygroundMode,
   getSupportedModelCount,
   filterPlaygroundModelsForMode,
+  groupPlaygroundModelsByProvider,
   isPlaygroundModeConfigured,
   PLAYGROUND_MODES,
 } from 'llmhub-shared/playground.js';
@@ -112,5 +113,40 @@ describe('playground capability helpers', () => {
     expect(filterPlaygroundModelsForMode(models, 'video').map(model => model.modelId)).toEqual(['video-model']);
     expect(filterPlaygroundModelsForMode(models, 'speech').map(model => model.modelId)).toEqual(['speech-model']);
     expect(filterPlaygroundModelsForMode(models, 'realtime').map(model => model.modelId)).toEqual(['realtime-model']);
+  });
+
+  it('drops paid models from the selector only when free-only mode is requested', () => {
+    const models = [
+      { modelId: 'free-chat', enabled: true, keyCount: 1, capabilities: ['chat'], isFree: true },
+      { modelId: 'paid-chat', enabled: true, keyCount: 1, capabilities: ['chat'], isFree: false },
+      { modelId: 'legacy-chat', enabled: true, keyCount: 1, capabilities: ['chat'] },
+    ];
+
+    // Default (no free-only): every routable model shows, including paid + untagged.
+    expect(filterPlaygroundModelsForMode(models, 'chat').map(m => m.modelId)).toEqual([
+      'free-chat',
+      'paid-chat',
+      'legacy-chat',
+    ]);
+
+    // Free-only: paid rows drop out; untagged (isFree === undefined) is treated as free.
+    expect(filterPlaygroundModelsForMode(models, 'chat', { freeOnly: true }).map(m => m.modelId)).toEqual([
+      'free-chat',
+      'legacy-chat',
+    ]);
+  });
+
+  it('groups selector models by provider, sorted by platform then display name', () => {
+    const models = [
+      { platform: 'groq', modelId: 'g2', displayName: 'Groq Beta' },
+      { platform: 'bazaarlink', modelId: 'b1', displayName: 'BZL Sonnet' },
+      { platform: 'groq', modelId: 'g1', displayName: 'Groq Alpha' },
+      { platform: 'bazaarlink', modelId: 'b2', displayName: 'BZL Haiku' },
+    ];
+
+    const groups = groupPlaygroundModelsByProvider(models);
+    expect(groups.map(g => g.platform)).toEqual(['bazaarlink', 'groq']);
+    expect(groups[0].models.map(m => m.modelId)).toEqual(['b2', 'b1']); // Haiku before Sonnet
+    expect(groups[1].models.map(m => m.modelId)).toEqual(['g1', 'g2']); // Alpha before Beta
   });
 });
