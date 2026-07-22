@@ -45,7 +45,10 @@ export async function initDb(dbPath) {
     migrateModelsV14(db);
     migrateModelsV15(db);
     migrateModelsV16(db);
+    migrateModelsV17(db);
     seedModelCapabilities(db);
+    // Must follow seedModelCapabilities — that is where the image rows are seeded.
+    flagPaidGoogleModels(db);
     ensureUnifiedKey(db);
     // Auto-categorize all models on startup
     const { autoCategorizeAllModels } = await import('../services/model-categorizer.js');
@@ -1359,6 +1362,82 @@ function migrateModelsV16(db) {
             flag.run(id);
     });
     tx();
+}
+/**
+ * V17 (July 2026): Google catalog refresh.
+ *
+ * Verified 2026-07-22 against ai.google.dev/gemini-api/docs/pricing (the
+ * "Free Tier" column reads "Free of charge" vs "Not available") and a live
+ * generateContent probe with a real key:
+ *
+ * 1. New free-tier models the hardcoded scout allowlist could never discover:
+ *    gemini-3.6-flash (newest stable Flash), gemini-3.5-flash-lite, and the
+ *    Gemma 4 pair. All four answered a live probe. Gemma is ranked below the
+ *    Gemini models because it emits verbose/thinking-style output, so
+ *    auto-routing prefers the cleaner Gemini rows first.
+ * 2. Image-generation models are NOT free ("Not available" on the free tier)
+ *    but were seeded enabled with the is_free default of 1, so free-only mode
+ *    would have happily routed paid image traffic. Flag them paid.
+ *
+ * Rate limits mirror the V14 free-tier estimates (Google publishes per-model
+ * RPM only in the AI Studio widget). Gemma context windows are conservative.
+ */
+function migrateModelsV17(db) {
+    const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank, size_label,
+      rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window, enabled, is_free
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+    const newFreeModels = [
+        ['google', 'gemini-3.6-flash', 'Gemini 3.6 Flash', 1, 5, 'Frontier', 10, 20, 250000, null, '~3M', 1048576, 1, 1],
+        ['google', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 7, 3, 'Medium', 15, 20, 250000, null, '~3M', 1048576, 1, 1],
+        // Gemma 4 (gemma-4-31b-it / gemma-4-26b-a4b-it) is also free on the Gemini
+        // API and answers a live probe, but it is deliberately NOT seeded here:
+        // BazaarLink's scout already auto-discovered rows with the same model_id
+        // (disabled), and resolveRoutableModel matches on model_id without a
+        // platform filter, so the disabled row wins and the model is unreachable.
+        // Add Gemma once that cross-provider id collision is fixed.
+    ];
+    const addFallback = db.prepare(`
+    INSERT OR IGNORE INTO fallback_config (model_db_id, priority, enabled)
+    VALUES (?, ?, ?)
+  `);
+    const getModel = db.prepare('SELECT id, enabled FROM models WHERE platform = ? AND model_id = ?');
+    const apply = db.transaction(() => {
+        for (const model of newFreeModels)
+            insert.run(...model);
+        const maxPriority = db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get().mx;
+        let priority = maxPriority + 1;
+        for (const model of newFreeModels) {
+            const row = getModel.get(model[0], model[1]);
+            if (row)
+                addFallback.run(row.id, priority++, row.enabled);
+        }
+    });
+    apply();
+}
+/**
+ * Mark Google models that have no free tier (verified 2026-07-22 against
+ * ai.google.dev pricing — image generation reads "Not available" in the Free
+ * Tier column). Runs AFTER seedModelCapabilities because that function is what
+ * seeds the image/audio rows; flagging earlier would silently no-op.
+ * Idempotent.
+ */
+function flagPaidGoogleModels(db) {
+    const markPaid = db.prepare("UPDATE models SET is_free = 0 WHERE platform = 'google' AND model_id = ?");
+    const paidGoogleModels = [
+        'gemini-2.5-flash-image',
+        'gemini-3.1-flash-image',
+        'gemini-3.1-flash-image-preview',
+        'gemini-3.1-pro-preview',
+    ];
+    const apply = db.transaction(() => {
+        for (const modelId of paidGoogleModels)
+            markPaid.run(modelId);
+    });
+    apply();
 }
 function ensureUnifiedKey(db) {
     const existing = db.prepare("SELECT value FROM settings WHERE key = 'unified_api_key'").get();

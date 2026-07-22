@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
+import { setFreeOnlyMode } from '../../lib/app-settings.js';
 
 async function request(app: Express, method: string, path: string, body?: any) {
   const server = app.listen(0);
@@ -64,6 +65,14 @@ describe('Images proxy route', () => {
     const db = getDb();
     db.prepare('DELETE FROM api_keys').run();
     db.prepare('DELETE FROM requests').run();
+    // Google image generation has no free tier (V17 flags it is_free=0), so
+    // free-only mode legitimately blocks it. These tests exercise image ROUTING
+    // mechanics, not billing policy, so opt out explicitly.
+    setFreeOnlyMode(db, false);
+  });
+
+  afterEach(() => {
+    setFreeOnlyMode(getDb(), true);
   });
 
   afterEach(() => {
