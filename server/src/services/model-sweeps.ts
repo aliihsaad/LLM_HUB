@@ -7,6 +7,7 @@ import type {
 } from 'llmhub-shared/types.js';
 import { getDb } from '../db/index.js';
 import { decrypt } from '../lib/crypto.js';
+import { isFreeOnlyMode } from '../lib/app-settings.js';
 import { PROVIDER_METADATA } from '../lib/provider-metadata.js';
 import { getProvider } from '../providers/index.js';
 import { recordRequest, recordTokens, setCooldown } from './ratelimit.js';
@@ -119,8 +120,13 @@ async function runSweep(jobId: string, targets: SweepTarget[]) {
   }
 }
 
-function listSweepTargets(): SweepTarget[] {
+/** Sweep candidates feeding the dashboard "test all models now" action, which
+ *  makes real chatCompletion calls. Gated the same way as selectSweepCandidateIds
+ *  in model-scout.ts: paid rows are excluded while free-only mode is on so the
+ *  sweep never spends key credit. */
+export function listSweepTargets(): SweepTarget[] {
   const db = getDb();
+  const freeOnly = isFreeOnlyMode(db);
   const rows = db.prepare(`
     SELECT
       m.id AS model_db_id,
@@ -135,6 +141,7 @@ function listSweepTargets(): SweepTarget[] {
       AND mc.capability = 'chat'
       AND mc.enabled = 1
     WHERE m.enabled = 1
+      ${freeOnly ? 'AND m.is_free = 1' : ''}
       AND fc.enabled = 1
       AND (
         mc.id IS NOT NULL

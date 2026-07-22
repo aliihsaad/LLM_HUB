@@ -19,15 +19,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { RealtimeSessionPanel } from '@/components/realtime-session-panel'
 import { cn } from '@/lib/utils'
 import {
   getConfiguredProviderCount,
+  describePlaygroundFallback,
   filterPlaygroundModelsForMode,
   getPlaygroundMode,
   getSupportedModelCount,
+  groupPlaygroundModelsByProvider,
   isPlaygroundModeConfigured,
   type PlaygroundCapabilityMode,
 } from '../../../shared/playground'
@@ -40,6 +42,7 @@ interface PlaygroundChatModelOption {
   displayName: string
   keyCount: number
   capabilities?: string[]
+  isFree?: boolean
 }
 
 interface PlaygroundChatPanelProps {
@@ -47,6 +50,7 @@ interface PlaygroundChatPanelProps {
   models: PlaygroundChatModelOption[]
   realtimeModels?: PlaygroundChatModelOption[]
   capabilityData?: CapabilitiesResponse
+  freeOnly?: boolean
 }
 
 type MessageRole = 'user' | 'assistant' | 'system'
@@ -65,6 +69,7 @@ interface ChatMessageItem {
     latency?: number
     endpoint?: string
     fallbackAttempts?: number
+    fallbackReason?: string
     mode?: PlaygroundCapabilityMode
   }
 }
@@ -187,9 +192,10 @@ async function readJsonResponse(res: Response) {
   return res.json().catch(() => null)
 }
 
-export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capabilityData }: PlaygroundChatPanelProps) {
+export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capabilityData, freeOnly = false }: PlaygroundChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageItem[]>(loadMessages)
   const [action, setAction] = useState<PlaygroundCapabilityMode>('chat')
+  const [selectedProvider, setSelectedProvider] = useState('all')
   const [selectedModel, setSelectedModel] = useState('auto')
   const [input, setInput] = useState('Explain what this LLM-Hub proxy can do in two short sentences.')
   const [imageUrl, setImageUrl] = useState('')
@@ -211,8 +217,18 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
   const activeDefinition = getPlaygroundMode(action)
   const baseModelOptions = action === 'realtime' ? realtimeModels : models
   const modelOptions = useMemo(
-    () => filterPlaygroundModelsForMode(baseModelOptions, action),
-    [action, baseModelOptions],
+    () => filterPlaygroundModelsForMode(baseModelOptions, action, { freeOnly }),
+    [action, baseModelOptions, freeOnly],
+  )
+  const providerGroups = useMemo(
+    () => groupPlaygroundModelsByProvider(modelOptions),
+    [modelOptions],
+  )
+  const visibleModelOptions = useMemo(
+    () => selectedProvider === 'all'
+      ? modelOptions
+      : modelOptions.filter(model => model.platform === selectedProvider),
+    [modelOptions, selectedProvider],
   )
   const activeModelLabel = selectedModel === 'auto'
     ? action === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${activeAction.label} route)`
@@ -243,11 +259,23 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
   }, [])
 
   useEffect(() => {
+    if (selectedProvider === 'all') return
+    if (!providerGroups.some(group => group.platform === selectedProvider)) {
+      setSelectedProvider('all')
+    }
+  }, [providerGroups, selectedProvider])
+
+  useEffect(() => {
     if (selectedModel === 'auto') return
-    if (!modelOptions.some(model => model.modelId === selectedModel)) {
+    if (!visibleModelOptions.some(model => model.modelId === selectedModel)) {
       setSelectedModel('auto')
     }
-  }, [action, modelOptions, selectedModel])
+  }, [visibleModelOptions, selectedModel])
+
+  function handleProviderChange(value: string | null) {
+    setSelectedProvider(value ?? 'all')
+    setSelectedModel('auto')
+  }
 
   async function runAction() {
     if (busy) return
@@ -328,6 +356,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       status: 'success',
       meta: { ...meta, mode: action, endpoint: '/v1/chat/completions' },
     })
+    noteFallback(meta)
     setInput('')
   }
 
@@ -348,6 +377,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       status: 'success',
       meta: { ...meta, mode: action, endpoint: activeDefinition.endpoint },
     })
+    noteFallback(meta)
   }
 
   async function runImageGeneration() {
@@ -368,6 +398,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       imageSrc: imageSrcFrom(data),
       meta: { ...meta, mode: action, endpoint: activeDefinition.endpoint },
     })
+    noteFallback(meta)
   }
 
   async function runImageEdit() {
@@ -391,6 +422,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       imageSrc: imageSrcFrom(data),
       meta: { ...meta, mode: action, endpoint: activeDefinition.endpoint },
     })
+    noteFallback(meta)
   }
 
   async function runImageVariation() {
@@ -414,6 +446,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       imageSrc: imageSrcFrom(data),
       meta: { ...meta, mode: action, endpoint: activeDefinition.endpoint },
     })
+    noteFallback(meta)
   }
 
   async function runSpeechFromInput() {
@@ -430,6 +463,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       audioSrc,
       meta: { ...meta, mode: action, endpoint: activeDefinition.endpoint },
     })
+    noteFallback(meta)
   }
 
   async function runAudioText() {
@@ -454,6 +488,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       status: 'success',
       meta: { ...meta, mode: action, endpoint: activeDefinition.endpoint },
     })
+    noteFallback(meta)
   }
 
   async function speakMessage(message: ChatMessageItem) {
@@ -491,6 +526,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       ...routedViaFrom(res, data),
       latency: Date.now() - start,
       fallbackAttempts: Number(res.headers.get('X-Fallback-Attempts') ?? '') || undefined,
+      fallbackReason: res.headers.get('X-Fallback-Reason') ?? undefined,
     }
     if (!res.ok || data?.error) {
       const error = new Error(data?.error?.message ?? errorMessageFromBody(data) ?? `HTTP ${res.status}`)
@@ -512,6 +548,7 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
       ...routedViaFrom(res, data),
       latency: Date.now() - start,
       fallbackAttempts: Number(res.headers.get('X-Fallback-Attempts') ?? '') || undefined,
+      fallbackReason: res.headers.get('X-Fallback-Reason') ?? undefined,
     }
     if (!res.ok || data?.error) throw new Error(data?.error?.message ?? errorMessageFromBody(data) ?? `HTTP ${res.status}`)
     return { data, meta }
@@ -544,6 +581,18 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
 
   function appendMessage(message: Omit<ChatMessageItem, 'id'>) {
     setMessages(current => [...current, { id: nextId(), ...message }].slice(-60))
+  }
+
+  // When a pinned model was replaced by the fallback chain, tell the user which
+  // model actually answered (and why), instead of leaving it a silent swap.
+  function noteFallback(meta: { platform?: string; model?: string; fallbackReason?: string; latency?: number; fallbackAttempts?: number }) {
+    const notice = describePlaygroundFallback({
+      requestedModelId: selectedModel,
+      servedPlatform: meta.platform,
+      servedModelId: meta.model,
+      reason: meta.fallbackReason,
+    })
+    if (notice) appendMessage({ role: 'system', content: `⚠️ ${notice}`, meta: { mode: action } })
   }
 
   function clearMessages() {
@@ -585,6 +634,19 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
     }
   }
 
+  function modelSelectItem(model: PlaygroundChatModelOption) {
+    return (
+      <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{model.displayName}</span>
+          {model.isFree === false && (
+            <span className="rounded bg-amber-500/15 px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-500">paid</span>
+          )}
+        </span>
+      </SelectItem>
+    )
+  }
+
   return (
     <div className="grid min-h-0 gap-4 lg:h-[calc(100vh-15rem)] lg:min-h-[620px] lg:grid-cols-[340px_minmax(0,1fr)]">
       <Card className="min-w-0 border border-border/70 bg-card/95 shadow-sm lg:max-h-full">
@@ -600,26 +662,47 @@ export function PlaygroundChatPanel({ apiKey, models, realtimeModels = [], capab
         </div>
 
         <div className="mt-4 space-y-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Model</Label>
-            <Select value={selectedModel} onValueChange={(value) => setSelectedModel(value ?? 'auto')}>
-              <SelectTrigger className="w-full min-w-0">
-                <span className="truncate">{activeModelLabel}</span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">
-                  {action === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${activeAction.label} route)`}
-                </SelectItem>
-                {modelOptions.map(model => (
-                  <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate">{model.displayName}</span>
-                      <span className="text-xs text-muted-foreground">{model.platform}</span>
-                    </span>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Provider</Label>
+              <Select value={selectedProvider} onValueChange={handleProviderChange}>
+                <SelectTrigger className="w-full min-w-0">
+                  <span className="truncate">{selectedProvider === 'all' ? 'All providers' : selectedProvider}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All providers</SelectItem>
+                  {providerGroups.map(group => (
+                    <SelectItem key={group.platform} value={group.platform}>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{group.platform}</span>
+                        <span className="text-xs text-muted-foreground tabular-nums">{group.models.length}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Model</Label>
+              <Select value={selectedModel} onValueChange={(value) => setSelectedModel(value ?? 'auto')}>
+                <SelectTrigger className="w-full min-w-0">
+                  <span className="truncate">{activeModelLabel}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    {action === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${activeAction.label} route)`}
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  {selectedProvider === 'all'
+                    ? providerGroups.map(group => (
+                        <SelectGroup key={group.platform}>
+                          <SelectLabel>{group.platform}</SelectLabel>
+                          {group.models.map(modelSelectItem)}
+                        </SelectGroup>
+                      ))
+                    : visibleModelOptions.map(modelSelectItem)}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

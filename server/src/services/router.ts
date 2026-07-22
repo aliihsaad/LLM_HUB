@@ -2,6 +2,7 @@ import { getDb } from '../db/index.js';
 import { getProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { canMakeRequest, canUseTokens, isOnCooldown } from './ratelimit.js';
+import { isFreeOnlyMode } from '../lib/app-settings.js';
 import type { BaseProvider } from '../providers/base.js';
 
 interface ModelRow {
@@ -308,6 +309,7 @@ export function routeRequestInternal(
   platformFilter?: string,
 ): RouteResult {
   const db = getDb();
+  const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
 
   // Get fallback chain ordered by priority
   const categorySql = category
@@ -326,6 +328,7 @@ export function routeRequestInternal(
              WHERE any_mc.model_db_id = fc.model_db_id
            ))
         ${platformFilter ? 'AND m.platform = ?' : ''}
+        ${freeOnlyFragment}
       ORDER BY fc.priority ASC
     `
     : `
@@ -342,6 +345,7 @@ export function routeRequestInternal(
            WHERE any_mc.model_db_id = fc.model_db_id
          ))
         ${platformFilter ? 'AND m.platform = ?' : ''}
+        ${freeOnlyFragment}
       ORDER BY fc.priority ASC
     `;
   const fallbackChain = category
@@ -451,6 +455,7 @@ export function routeCapabilityRequest(
   platformFilter?: string,
 ): RouteResult {
   const db = getDb();
+  const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
 
   const capabilityRows = db.prepare(`
     SELECT mc.model_db_id, mc.priority, mc.enabled
@@ -461,6 +466,7 @@ export function routeCapabilityRequest(
       AND m.enabled = 1
       AND (? IS NULL OR m.model_id = ?)
       ${platformFilter ? 'AND m.platform = ?' : ''}
+      ${freeOnlyFragment}
     ORDER BY mc.priority ASC, m.intelligence_rank ASC
   `).all(capability, requestedModel ?? null, requestedModel ?? null, ...(platformFilter ? [platformFilter] : [])) as FallbackRow[];
 

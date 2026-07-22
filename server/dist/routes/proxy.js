@@ -6,6 +6,8 @@ import { recordRequest, recordTokens, setCooldown } from '../services/ratelimit.
 import { canRetryProviderFailure, classifyProviderError, } from '../services/provider-errors.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { hasProvider } from '../providers/index.js';
+import { resolveRoutableModel, sendResolutionError } from '../lib/resolve-model.js';
+import { isFreeOnlyMode } from '../lib/app-settings.js';
 export const proxyRouter = Router();
 export const geminiProxyRouter = Router();
 const GOOGLE_GENERATE_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -112,6 +114,7 @@ function setStickyModel(messages, modelDbId) {
 // realtime/audio/image-only models.
 proxyRouter.get('/models', (_req, res) => {
     const db = getDb();
+    const freeOnly = isFreeOnlyMode(db);
     const models = db.prepare(`
     SELECT
       m.id,
@@ -120,6 +123,7 @@ proxyRouter.get('/models', (_req, res) => {
       m.display_name,
       m.context_window,
       m.intelligence_rank,
+      m.is_free,
       COUNT(DISTINCT ak.id) AS key_count,
       GROUP_CONCAT(DISTINCT mc.capability) AS capabilities
     FROM models m
@@ -133,6 +137,7 @@ proxyRouter.get('/models', (_req, res) => {
     LEFT JOIN model_runtime_health rh
       ON rh.model_db_id = m.id
     WHERE m.enabled = 1
+      ${freeOnly ? 'AND m.is_free = 1' : ''}
       AND (
         rh.model_db_id IS NULL
         OR NOT (
@@ -694,7 +699,7 @@ async function handleGeminiGenerateContentRequest(req, res, model, isStream) {
     }
     const db = getDb();
     const catalogRow = db.prepare(`
-    SELECT id, enabled, platform
+    SELECT id, enabled, platform, is_free
     FROM models
     WHERE model_id = ?
   `).get(requestedModel);
@@ -716,6 +721,14 @@ async function handleGeminiGenerateContentRequest(req, res, model, isStream) {
                 code: 'model_not_found',
             },
         });
+        return;
+    }
+    // Bridge free-tier-only enforcement into the Gemini-native compatibility
+    // path: this route resolves models straight from the catalog and never
+    // went through resolveRoutableModel(), so a paid Google model would
+    // otherwise slip past the same gate every other explicit-model block uses.
+    if (catalogRow.is_free !== 1 && isFreeOnlyMode(db)) {
+        sendResolutionError(res, requestedModel, { kind: 'paid_blocked' });
         return;
     }
     const requestBody = parsed.data;
@@ -966,55 +979,12 @@ proxyRouter.post('/chat/completions', async (req, res) => {
     let preferredModel;
     if (requestedModel) {
         const db = getDb();
-        if (requiredCapability) {
-            const row = db.prepare(`
-        SELECT m.id, m.enabled AS model_enabled, mc.enabled AS capability_enabled
-        FROM models m
-        LEFT JOIN model_capabilities mc
-          ON mc.model_db_id = m.id AND mc.capability = ?
-        WHERE m.model_id = ?
-      `).get(requiredCapability, requestedModel);
-            if (!row || !row.capability_enabled) {
-                const reason = row ? `does not support ${requiredCapability}` : 'is not in the catalog';
-                res.status(400).json({
-                    error: {
-                        message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                        type: 'invalid_request_error',
-                        code: 'model_not_found',
-                    },
-                });
-                return;
-            }
-            if (row.model_enabled !== 1) {
-                res.status(400).json({
-                    error: {
-                        message: `Model '${requestedModel}' is disabled. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                        type: 'invalid_request_error',
-                        code: 'model_not_found',
-                    },
-                });
-                return;
-            }
-            preferredModel = row.id;
+        const resolution = resolveRoutableModel(db, requestedModel, requiredCapability);
+        if (resolution.kind !== 'ok') {
+            sendResolutionError(res, requestedModel, resolution);
+            return;
         }
-        else {
-            const enabled = db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1').get(requestedModel);
-            if (enabled) {
-                preferredModel = enabled.id;
-            }
-            else {
-                const disabled = db.prepare('SELECT id FROM models WHERE model_id = ?').get(requestedModel);
-                const reason = disabled ? 'is disabled' : 'is not in the catalog';
-                res.status(400).json({
-                    error: {
-                        message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                        type: 'invalid_request_error',
-                        code: 'model_not_found',
-                    },
-                });
-                return;
-            }
-        }
+        preferredModel = resolution.id;
     }
     else if (!requiredCapability) {
         preferredModel = getStickyModel(messages);
@@ -1023,6 +993,22 @@ proxyRouter.post('/chat/completions', async (req, res) => {
     const skipKeys = new Set();
     const skipModels = new Set();
     let lastError = null;
+    // Surface fallback transparently: when an explicitly requested model is
+    // replaced by another (rate-limited, no healthy key, or upstream failure),
+    // echo the requested id + the reason so clients can show it instead of a
+    // silent substitution. Fallback itself stays enabled by design.
+    const setRoutingHeaders = (route, attempt) => {
+        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+        if (attempt > 0)
+            res.setHeader('X-Fallback-Attempts', String(attempt));
+        if (requestedModel && preferredModel != null && route.modelDbId !== preferredModel) {
+            const reason = lastError?.message
+                ? String(lastError.message).slice(0, 200)
+                : 'requested model unavailable (rate-limited or no healthy key)';
+            res.setHeader('X-Requested-Model', requestedModel);
+            res.setHeader('X-Fallback-Reason', reason.replace(/[\r\n]+/g, ' '));
+        }
+    };
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         let route;
         try {
@@ -1062,9 +1048,7 @@ proxyRouter.post('/chat/completions', async (req, res) => {
                             res.setHeader('Content-Type', 'text/event-stream');
                             res.setHeader('Cache-Control', 'no-cache');
                             res.setHeader('Connection', 'keep-alive');
-                            res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-                            if (attempt > 0)
-                                res.setHeader('X-Fallback-Attempts', String(attempt));
+                            setRoutingHeaders(route, attempt);
                             streamStarted = true;
                         }
                         const text = chunk.choices[0]?.delta?.content ?? '';
@@ -1074,7 +1058,7 @@ proxyRouter.post('/chat/completions', async (req, res) => {
                     if (!streamStarted) {
                         // Upstream returned no chunks — emit minimal successful stream.
                         res.setHeader('Content-Type', 'text/event-stream');
-                        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+                        setRoutingHeaders(route, attempt);
                     }
                     res.write('data: [DONE]\n\n');
                     res.end();
@@ -1114,9 +1098,7 @@ proxyRouter.post('/chat/completions', async (req, res) => {
                 recordTokens(route.platform, route.modelId, route.keyId, totalTokens);
                 recordSuccess(route.modelDbId);
                 setStickyModel(messages, route.modelDbId);
-                res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-                if (attempt > 0)
-                    res.setHeader('X-Fallback-Attempts', String(attempt));
+                setRoutingHeaders(route, attempt);
                 res.json(result);
                 logRequest(route.platform, route.modelId, 'success', result.usage?.prompt_tokens ?? 0, result.usage?.completion_tokens ?? 0, Date.now() - start, null);
                 return;
@@ -1170,32 +1152,9 @@ proxyRouter.post('/embeddings', async (req, res) => {
     const requestedModel = rawRequestedModel === 'auto' ? undefined : rawRequestedModel;
     if (requestedModel) {
         const db = getDb();
-        const row = db.prepare(`
-      SELECT m.id, mc.enabled AS capability_enabled, m.enabled AS model_enabled
-      FROM models m
-      LEFT JOIN model_capabilities mc
-        ON mc.model_db_id = m.id AND mc.capability = 'embeddings'
-      WHERE m.model_id = ?
-    `).get(requestedModel);
-        if (!row || !row.capability_enabled) {
-            const reason = row ? 'does not support embeddings' : 'is not in the catalog';
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
-            return;
-        }
-        if (row.model_enabled !== 1) {
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' is disabled. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
+        const resolution = resolveRoutableModel(db, requestedModel, 'embeddings');
+        if (resolution.kind !== 'ok') {
+            sendResolutionError(res, requestedModel, resolution);
             return;
         }
     }
@@ -1279,32 +1238,9 @@ proxyRouter.post('/images/generations', async (req, res) => {
     const requestedModel = request.model;
     if (requestedModel) {
         const db = getDb();
-        const row = db.prepare(`
-      SELECT m.id, mc.enabled AS capability_enabled, m.enabled AS model_enabled
-      FROM models m
-      LEFT JOIN model_capabilities mc
-        ON mc.model_db_id = m.id AND mc.capability = 'image_generation'
-      WHERE m.model_id = ?
-    `).get(requestedModel);
-        if (!row || !row.capability_enabled) {
-            const reason = row ? 'does not support image generation' : 'is not in the catalog';
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
-            return;
-        }
-        if (row.model_enabled !== 1) {
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' is disabled. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
+        const resolution = resolveRoutableModel(db, requestedModel, 'image_generation');
+        if (resolution.kind !== 'ok') {
+            sendResolutionError(res, requestedModel, resolution);
             return;
         }
     }
@@ -1395,32 +1331,9 @@ async function handleImageRequest(req, res, operation) {
     const requestedModel = request.model;
     if (requestedModel) {
         const db = getDb();
-        const row = db.prepare(`
-      SELECT m.id, mc.enabled AS capability_enabled, m.enabled AS model_enabled
-      FROM models m
-      LEFT JOIN model_capabilities mc
-        ON mc.model_db_id = m.id AND mc.capability = ?
-      WHERE m.model_id = ?
-    `).get(capability, requestedModel);
-        if (!row || !row.capability_enabled) {
-            const reason = row ? `does not support ${actionLabel}` : 'is not in the catalog';
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
-            return;
-        }
-        if (row.model_enabled !== 1) {
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' is disabled. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
+        const resolution = resolveRoutableModel(db, requestedModel, capability);
+        if (resolution.kind !== 'ok') {
+            sendResolutionError(res, requestedModel, resolution);
             return;
         }
     }
@@ -1516,32 +1429,9 @@ async function handleAudioTextRequest(req, res, operation) {
     const requestedModel = request.model;
     if (requestedModel) {
         const db = getDb();
-        const row = db.prepare(`
-      SELECT m.id, mc.enabled AS capability_enabled, m.enabled AS model_enabled
-      FROM models m
-      LEFT JOIN model_capabilities mc
-        ON mc.model_db_id = m.id AND mc.capability = ?
-      WHERE m.model_id = ?
-    `).get(capability, requestedModel);
-        if (!row || !row.capability_enabled) {
-            const reason = row ? `does not support ${actionLabel}` : 'is not in the catalog';
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
-            return;
-        }
-        if (row.model_enabled !== 1) {
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' is disabled. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
+        const resolution = resolveRoutableModel(db, requestedModel, capability);
+        if (resolution.kind !== 'ok') {
+            sendResolutionError(res, requestedModel, resolution);
             return;
         }
     }
@@ -1649,32 +1539,9 @@ proxyRouter.post('/realtime/sessions', async (req, res) => {
     const requestedModel = request.model;
     if (requestedModel) {
         const db = getDb();
-        const row = db.prepare(`
-      SELECT m.id, mc.enabled AS capability_enabled, m.enabled AS model_enabled
-      FROM models m
-      LEFT JOIN model_capabilities mc
-        ON mc.model_db_id = m.id AND mc.capability = 'realtime_audio'
-      WHERE m.model_id = ?
-    `).get(requestedModel);
-        if (!row || !row.capability_enabled) {
-            const reason = row ? 'does not support realtime audio' : 'is not in the catalog';
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
-            return;
-        }
-        if (row.model_enabled !== 1) {
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' is disabled. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
+        const resolution = resolveRoutableModel(db, requestedModel, 'realtime_audio');
+        if (resolution.kind !== 'ok') {
+            sendResolutionError(res, requestedModel, resolution);
             return;
         }
     }
@@ -1767,32 +1634,9 @@ proxyRouter.post('/audio/speech', async (req, res) => {
     }
     if (requestedModel) {
         const db = getDb();
-        const row = db.prepare(`
-      SELECT m.id, mc.enabled AS capability_enabled, m.enabled AS model_enabled
-      FROM models m
-      LEFT JOIN model_capabilities mc
-        ON mc.model_db_id = m.id AND mc.capability = 'speech'
-      WHERE m.model_id = ?
-    `).get(requestedModel);
-        if (!row || !row.capability_enabled) {
-            const reason = row ? 'does not support speech' : 'is not in the catalog';
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' ${reason}. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
-            return;
-        }
-        if (row.model_enabled !== 1) {
-            res.status(400).json({
-                error: {
-                    message: `Model '${requestedModel}' is disabled. Omit the 'model' field to auto-route, or call /v1/models for the available list.`,
-                    type: 'invalid_request_error',
-                    code: 'model_not_found',
-                },
-            });
+        const resolution = resolveRoutableModel(db, requestedModel, 'speech');
+        if (resolution.kind !== 'ok') {
+            sendResolutionError(res, requestedModel, resolution);
             return;
         }
     }

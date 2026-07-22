@@ -19,7 +19,7 @@ fallbackRouter.get('/', (_req, res) => {
     SELECT fc.model_db_id, fc.priority, fc.enabled,
            m.platform, m.model_id, m.display_name, m.intelligence_rank,
            m.speed_rank, m.size_label, m.rpm_limit, m.rpd_limit,
-           m.monthly_token_budget
+           m.monthly_token_budget, m.is_free
     FROM fallback_config fc
     JOIN models m ON m.id = fc.model_db_id
     LEFT JOIN model_capabilities mc
@@ -62,6 +62,7 @@ fallbackRouter.get('/', (_req, res) => {
             providerDisplayName: PROVIDER_METADATA[r.platform]?.displayName ?? r.platform,
             modelId: r.model_id,
             displayName: r.display_name,
+            isFree: r.is_free === 1,
             intelligenceRank: r.intelligence_rank,
             speedRank: r.speed_rank,
             sizeLabel: r.size_label,

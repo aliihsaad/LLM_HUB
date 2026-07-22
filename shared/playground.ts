@@ -34,6 +34,7 @@ export interface PlaygroundModelCapabilityOption {
   enabled?: boolean;
   keyCount?: number;
   capabilities?: readonly string[];
+  isFree?: boolean;
 }
 
 export interface PlaygroundModeDefinition {
@@ -176,13 +177,64 @@ export function getPlaygroundRouteCapability(mode: PlaygroundCapabilityMode): Pl
 export function filterPlaygroundModelsForMode<T extends PlaygroundModelCapabilityOption>(
   models: readonly T[],
   mode: PlaygroundCapabilityMode,
+  options?: { freeOnly?: boolean },
 ): T[] {
   const capability = getPlaygroundRouteCapability(mode);
   return models.filter(model => {
     if (model.enabled === false) return false;
     if ((model.keyCount ?? 1) <= 0) return false;
+    // Free-only mode hides paid rows the proxy would 403 anyway. An untagged
+    // model (isFree === undefined) is treated as free — matches the DB default.
+    if (options?.freeOnly && model.isFree === false) return false;
     return model.capabilities?.includes(capability) === true;
   });
+}
+
+export interface PlaygroundProviderGroup<T> {
+  platform: string;
+  models: T[];
+}
+
+/**
+ * Group model selector options by their provider, sorted by platform id and then
+ * display name. Powers the Playground's provider → model picker so a flat list of
+ * hundreds of models becomes a browsable, provider-scoped choice.
+ */
+export function groupPlaygroundModelsByProvider<T extends { platform: string; displayName: string }>(
+  models: readonly T[],
+): PlaygroundProviderGroup<T>[] {
+  const groups = new Map<string, T[]>();
+  for (const model of models) {
+    const list = groups.get(model.platform);
+    if (list) list.push(model);
+    else groups.set(model.platform, [model]);
+  }
+  return Array.from(groups.entries())
+    .map(([platform, list]) => ({
+      platform,
+      models: [...list].sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    }))
+    .sort((a, b) => a.platform.localeCompare(b.platform));
+}
+
+/**
+ * Build a human notice when the gateway served a different model than the one the
+ * user pinned. Returns null when there is nothing to report — no pin (`auto`/
+ * undefined), no served model yet, or the pinned model actually served. Fallback
+ * stays enabled by design; this only makes it visible instead of silent.
+ */
+export function describePlaygroundFallback(params: {
+  requestedModelId: string | undefined;
+  servedPlatform?: string;
+  servedModelId?: string;
+  reason?: string;
+}): string | null {
+  const { requestedModelId, servedPlatform, servedModelId, reason } = params;
+  if (!requestedModelId || requestedModelId === 'auto') return null;
+  if (!servedModelId || servedModelId === requestedModelId) return null;
+  const served = servedPlatform ? `${servedPlatform}/${servedModelId}` : servedModelId;
+  const base = `Selected model "${requestedModelId}" was unavailable — the request fell back to ${served}.`;
+  return reason ? `${base} (${reason})` : base;
 }
 
 export function getConfiguredProviderCount(response: CapabilitiesResponse | undefined, mode: PlaygroundCapabilityMode): number {

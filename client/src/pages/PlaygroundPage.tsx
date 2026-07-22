@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { PageHeader } from '@/components/page-header'
@@ -14,10 +14,12 @@ import { PlaygroundChatPanel } from '@/components/playground-chat-panel'
 import { RealtimeSessionPanel } from '@/components/realtime-session-panel'
 import { cn } from '@/lib/utils'
 import {
+  describePlaygroundFallback,
   filterPlaygroundModelsForMode,
   getConfiguredProviderCount,
   getPlaygroundMode,
   getSupportedModelCount,
+  groupPlaygroundModelsByProvider,
   isPlaygroundModeConfigured,
   PLAYGROUND_MODES,
   type PlaygroundCapabilityMode,
@@ -44,6 +46,7 @@ interface PlaygroundModelOption {
   keyCount: number
   enabled: boolean
   capabilities?: string[]
+  isFree?: boolean
 }
 
 interface CatalogModelEntry {
@@ -55,6 +58,7 @@ interface CatalogModelEntry {
   displayName: string
   keyCount: number
   capabilities?: string[]
+  isFree?: boolean
 }
 
 interface PlaygroundResult {
@@ -72,6 +76,7 @@ interface PlaygroundResult {
   }
   imageSrc?: string
   audioSrc?: string
+  warning?: string
   raw?: unknown
 }
 
@@ -176,6 +181,19 @@ function formatDuration(ms: number | null | undefined) {
   return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
 }
 
+function modelSelectItem(model: PlaygroundModelOption) {
+  return (
+    <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate">{model.displayName}</span>
+        {model.isFree === false && (
+          <span className="rounded bg-amber-500/15 px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-500">paid</span>
+        )}
+      </span>
+    </SelectItem>
+  )
+}
+
 export default function PlaygroundPage() {
   const queryClient = useQueryClient()
   const [surface, setSurface] = useState<PlaygroundSurface>('chat')
@@ -204,6 +222,14 @@ export default function PlaygroundPage() {
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
   })
+
+  const { data: freeOnlyData } = useQuery<{ freeOnlyMode: boolean }>({
+    queryKey: ['settings', 'free-only-mode'],
+    queryFn: () => apiFetch('/api/settings/free-only-mode'),
+  })
+  // Default ON matches the server default so paid rows never flash before the
+  // query resolves.
+  const freeOnly = freeOnlyData?.freeOnlyMode ?? true
 
   const fallbackQuery = useQuery<FallbackEntry[]>({
     queryKey: ['fallback'],
@@ -242,20 +268,29 @@ export default function PlaygroundPage() {
         keyCount: model.keyCount,
         enabled: model.enabled,
         capabilities: model.capabilities,
+        isFree: model.isFree,
       })),
     [modelCatalog],
   )
   const chatModelOptions = useMemo(
-    () => filterPlaygroundModelsForMode(catalogModelOptions, 'chat'),
-    [catalogModelOptions],
+    () => filterPlaygroundModelsForMode(catalogModelOptions, 'chat', { freeOnly }),
+    [catalogModelOptions, freeOnly],
+  )
+  const chatModelGroups = useMemo(
+    () => groupPlaygroundModelsByProvider(chatModelOptions),
+    [chatModelOptions],
   )
   const activeModeModelOptions = useMemo(
-    () => filterPlaygroundModelsForMode(catalogModelOptions, mode),
-    [catalogModelOptions, mode],
+    () => filterPlaygroundModelsForMode(catalogModelOptions, mode, { freeOnly }),
+    [catalogModelOptions, mode, freeOnly],
+  )
+  const activeModeModelGroups = useMemo(
+    () => groupPlaygroundModelsByProvider(activeModeModelOptions),
+    [activeModeModelOptions],
   )
   const realtimeModels = useMemo(
-    () => filterPlaygroundModelsForMode(catalogModelOptions, 'realtime'),
-    [catalogModelOptions],
+    () => filterPlaygroundModelsForMode(catalogModelOptions, 'realtime', { freeOnly }),
+    [catalogModelOptions, freeOnly],
   )
   const definition = getPlaygroundMode(mode)
   const configuredProviders = getConfiguredProviderCount(capabilityData, mode)
@@ -399,6 +434,12 @@ export default function PlaygroundPage() {
 
       const data = await res.json()
       const routed = routedViaFrom(res, data)
+      const fallbackNotice = describePlaygroundFallback({
+        requestedModelId: activeModel,
+        servedPlatform: routed.platform,
+        servedModelId: routed.model,
+        reason: res.headers.get('X-Fallback-Reason') ?? undefined,
+      }) ?? undefined
       if (data?.error) {
         pushResult({
           mode,
@@ -430,6 +471,7 @@ export default function PlaygroundPage() {
           fallbackAttempts: fallbackAttempts ? Number(fallbackAttempts) : undefined,
         },
         imageSrc: imageSrcFrom(data),
+        warning: fallbackNotice,
         raw: data,
       })
     } catch (error: any) {
@@ -642,13 +684,11 @@ function fileToDataUrl(file: File): Promise<string> {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto (fallback chain)</SelectItem>
-                  {chatModelOptions.map(m => (
-                    <SelectItem key={m.modelDbId} value={m.modelId}>
-                      <span className="flex items-center gap-2">
-                        <span>{m.displayName}</span>
-                        <span className="text-xs text-muted-foreground">{m.platform}</span>
-                      </span>
-                    </SelectItem>
+                  {chatModelGroups.map(group => (
+                    <SelectGroup key={group.platform}>
+                      <SelectLabel>{group.platform}</SelectLabel>
+                      {group.models.map(modelSelectItem)}
+                    </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
@@ -714,6 +754,7 @@ function fileToDataUrl(file: File): Promise<string> {
             models={catalogModelOptions}
             realtimeModels={realtimeModels}
             capabilityData={capabilityData}
+            freeOnly={freeOnly}
           />
         </div>
       ) : (
@@ -848,13 +889,11 @@ function fileToDataUrl(file: File): Promise<string> {
                     <SelectItem value="auto">
                       {mode === 'realtime' ? 'Auto (verified realtime default)' : `Auto (${definition.label} route)`}
                     </SelectItem>
-                    {activeModeModelOptions.map(model => (
-                      <SelectItem key={`${model.platform}-${model.modelDbId}`} value={model.modelId}>
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="truncate">{model.displayName}</span>
-                          <span className="text-xs text-muted-foreground">{model.platform}</span>
-                        </span>
-                      </SelectItem>
+                    {activeModeModelGroups.map(group => (
+                      <SelectGroup key={group.platform}>
+                        <SelectLabel>{group.platform}</SelectLabel>
+                        {group.models.map(modelSelectItem)}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1036,6 +1075,12 @@ function fileToDataUrl(file: File): Promise<string> {
                     {lastResult.meta?.model && <code className="break-all text-xs text-muted-foreground">{lastResult.meta.model}</code>}
                     {lastResult.meta?.latency != null && <span className="text-xs text-muted-foreground tabular-nums">{lastResult.meta.latency} ms</span>}
                   </div>
+
+                  {lastResult.warning && (
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                      ⚠️ {lastResult.warning}
+                    </div>
+                  )}
 
                   <pre className="max-h-[220px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background/55 p-3 text-xs leading-relaxed">
                     {lastResult.content}

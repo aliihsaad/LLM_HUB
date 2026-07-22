@@ -22,6 +22,7 @@ export const PLATFORM_ORDER = [
   'kilo',
   'pollinations',
   'llm7',
+  'bazaarlink',
 ] as const satisfies readonly Platform[];
 
 export const PROVIDER_METADATA: Record<Platform, ProviderMetadata> = {
@@ -213,6 +214,15 @@ export const PROVIDER_METADATA: Record<Platform, ProviderMetadata> = {
     consoleUrl: 'https://llm7.io/',
     apiBaseUrl: 'https://api.llm7.io/v1',
     requiresKey: false,
+  },
+  bazaarlink: {
+    platform: 'bazaarlink',
+    displayName: 'BazaarLink',
+    docsUrl: 'https://bazaarlink.ai',
+    keyUrl: 'https://bazaarlink.ai',
+    consoleUrl: 'https://bazaarlink.ai',
+    apiBaseUrl: 'https://bazaarlink.ai/api/v1',
+    requiresKey: true,
   },
 };
 

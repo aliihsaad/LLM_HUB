@@ -2,6 +2,7 @@ import { getDb } from '../db/index.js';
 import { getProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { categorizeModel } from './model-categorizer.js';
+import { isFreeOnlyMode } from '../lib/app-settings.js';
 import type { Platform } from 'llmhub-shared/types.js';
 
 const SCOUT_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
@@ -22,6 +23,7 @@ export interface DiscoveredModelCandidate {
   modelId: string;
   displayName: string;
   enabledByDefault?: boolean;
+  isFree?: boolean;
   capabilities?: DiscoveredModelCapability[];
 }
 
@@ -41,6 +43,7 @@ const CATALOG_SYNC_PLATFORMS = new Set<Platform>([
   'qwen',
   'siliconflow',
   'ovhcloud',
+  'bazaarlink',
 ]);
 
 const MAX_DISCOVERED_PER_PLATFORM = 100;
@@ -68,6 +71,7 @@ type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
 interface OpenAICompatModelListEntry {
   id?: string;
   name?: string;
+  context_length?: number | null;
   architecture?: {
     input_modalities?: string[];
     output_modalities?: string[];
@@ -82,6 +86,17 @@ interface OpenAICompatModelListEntry {
 function isZeroPrice(value: string | undefined): boolean {
   if (value == null) return false;
   return Number(value) === 0;
+}
+
+/** BazaarLink sync keeps only zero-priced, chat-usable, text-output entries —
+ *  the 44 zero-"priced" image/video-gen models bill elsewhere and stay out. */
+export function isBazaarlinkFreeChatEntry(entry: OpenAICompatModelListEntry & { context_length?: number | null }): boolean {
+  const zero = isZeroPrice(entry.pricing?.prompt) && isZeroPrice(entry.pricing?.completion);
+  if (!zero) return false;
+  const chatUsable = (entry.context_length ?? 0) > 0 || (entry.id ?? '').includes(':free');
+  if (!chatUsable) return false;
+  const outputs = entry.architecture?.output_modalities ?? ['text'];
+  return outputs.includes('text') && !outputs.some(o => o === 'image' || o === 'video');
 }
 
 function supportsImageInput(entry: OpenAICompatModelListEntry): boolean {
@@ -270,19 +285,26 @@ export async function checkModelAvailability(modelDbId: number): Promise<Availab
   }
 }
 
+/** Enabled models eligible for the availability sweep. Paid rows are skipped
+ *  while free-only mode is on so probes never spend key credit. */
+export function selectSweepCandidateIds(db: ReturnType<typeof getDb>): number[] {
+  const freeOnly = isFreeOnlyMode(db);
+  const rows = db.prepare(`
+    SELECT id FROM models WHERE enabled = 1 ${freeOnly ? 'AND is_free = 1' : ''}
+  `).all() as { id: number }[];
+  return rows.map(r => r.id);
+}
+
 /**
  * Check all enabled models in batches with delays to avoid rate limits.
  */
 export async function scoutAllModels(delayMs = 2000): Promise<AvailabilityCheck[]> {
   const db = getDb();
-  const models = db.prepare(`
-    SELECT id FROM models WHERE enabled = 1
-  `).all() as { id: number }[];
-
-  console.log(`[ModelScout] Checking ${models.length} models...`);
+  const ids = selectSweepCandidateIds(db);
+  console.log(`[ModelScout] Checking ${ids.length} models...`);
   const results: AvailabilityCheck[] = [];
 
-  for (const { id } of models) {
+  for (const id of ids) {
     try {
       const result = await checkModelAvailability(id);
       results.push(result);
@@ -348,6 +370,13 @@ export async function discoverNewModels(): Promise<DiscoveredModelCandidate[]> {
 
       const data = await res.json() as { data?: OpenAICompatModelListEntry[] };
 
+      // Drift detection only ever runs against an authoritative HTTP-200
+      // catalog response — never on a fetch/parse error — so a transient
+      // upstream failure can't disable the catalog. See applyPricingDrift().
+      if (platform === 'bazaarlink') {
+        applyPricingDrift(db, platform as Platform, (data.data ?? []) as Array<{ id?: string; pricing?: { prompt?: string; completion?: string } }>);
+      }
+
       let discoveredForPlatform = 0;
       for (const entry of data.data ?? []) {
         if (!entry.id) continue;
@@ -356,8 +385,13 @@ export async function discoverNewModels(): Promise<DiscoveredModelCandidate[]> {
         // Heuristic: explicit free models become routable immediately. Credit-
         // based/trial providers are persisted disabled so the catalog stays
         // current without silently routing into paid-only models.
-        const hasZeroPricing = platform === 'openrouter' && isZeroPrice(entry.pricing?.prompt) && isZeroPrice(entry.pricing?.completion);
+        const hasPricing = entry.pricing?.prompt != null || entry.pricing?.completion != null;
+        const hasZeroPricing = hasPricing
+          && isZeroPrice(entry.pricing?.prompt) && isZeroPrice(entry.pricing?.completion);
         const isLikelyFree = /:free|free-tier|free model|trial|sandbox/i.test(`${entry.id} ${entry.name ?? ''}`) || hasZeroPricing;
+
+        if (platform === 'bazaarlink' && !isBazaarlinkFreeChatEntry(entry)) continue;
+
         const shouldPersist = isLikelyFree || CATALOG_SYNC_PLATFORMS.has(platform as Platform);
         if (!shouldPersist) continue;
 
@@ -374,6 +408,7 @@ export async function discoverNewModels(): Promise<DiscoveredModelCandidate[]> {
           modelId: entry.id,
           displayName: entry.name ?? entry.id,
           enabledByDefault: isLikelyFree,
+          isFree: hasPricing ? hasZeroPricing : true,
           capabilities,
         });
 
@@ -416,8 +451,8 @@ export async function discoverAndPersistNewModels(): Promise<DiscoveredModelResu
     INSERT OR IGNORE INTO models (
       platform, model_id, display_name, intelligence_rank, speed_rank,
       size_label, rpm_limit, rpd_limit, tpm_limit, tpd_limit,
-      monthly_token_budget, context_window, enabled
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      monthly_token_budget, context_window, enabled, is_free
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateCategory = db.prepare(`
@@ -478,6 +513,7 @@ export async function discoverAndPersistNewModels(): Promise<DiscoveredModelResu
         '~? (discovered)',
         null,
         enabled,
+        candidate.isFree === false ? 0 : 1,
       );
 
       if (result.changes !== 1) {
@@ -510,6 +546,52 @@ export async function discoverAndPersistNewModels(): Promise<DiscoveredModelResu
     skippedKnownCount: skippedKnown.length,
     insertedModelIds,
   };
+}
+
+/**
+ * Re-verify pricing + presence for a pricing-bearing platform's existing rows.
+ * Only call with an authoritative (HTTP 200) upstream list — never on fetch
+ * errors, so transient failures cannot disable the catalog.
+ */
+export function applyPricingDrift(
+  db: ReturnType<typeof getDb>,
+  platform: Platform,
+  entries: Array<{ id?: string; pricing?: { prompt?: string; completion?: string } }>,
+): { becamePaid: string[]; wentMissing: string[] } {
+  const byId = new Map(entries.filter(e => e.id).map(e => [e.id as string, e]));
+  const rows = db.prepare(
+    'SELECT model_id, is_free, enabled FROM models WHERE platform = ?',
+  ).all(platform) as { model_id: string; is_free: number; enabled: number }[];
+
+  const becamePaid: string[] = [];
+  const wentMissing: string[] = [];
+  const setPaid = db.prepare('UPDATE models SET is_free = 0 WHERE platform = ? AND model_id = ?');
+  const disable = db.prepare('UPDATE models SET enabled = 0 WHERE platform = ? AND model_id = ?');
+
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      const upstream = byId.get(row.model_id);
+      if (!upstream) {
+        if (row.enabled === 1) {
+          disable.run(platform, row.model_id);
+          wentMissing.push(row.model_id);
+        }
+        continue;
+      }
+      const hasPricing = upstream.pricing?.prompt != null || upstream.pricing?.completion != null;
+      const zero = hasPricing
+        && isZeroPrice(upstream.pricing?.prompt) && isZeroPrice(upstream.pricing?.completion);
+      if (hasPricing && !zero && row.is_free === 1) {
+        setPaid.run(platform, row.model_id);
+        becamePaid.push(row.model_id);
+      }
+    }
+  });
+  tx();
+
+  if (becamePaid.length) console.warn(`[ModelScout] ${platform}: pricing drift, now paid: ${becamePaid.join(', ')}`);
+  if (wentMissing.length) console.warn(`[ModelScout] ${platform}: missing upstream, disabled: ${wentMissing.join(', ')}`);
+  return { becamePaid, wentMissing };
 }
 
 // — Background scheduler —

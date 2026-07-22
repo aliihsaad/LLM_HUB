@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getUnifiedApiKey, regenerateUnifiedKey, getDb } from '../db/index.js';
 import { getContext7Config } from '../services/knowledge-base.js';
+import { isFreeOnlyMode, setFreeOnlyMode } from '../lib/app-settings.js';
 export const settingsRouter = Router();
 // Get the unified API key
 settingsRouter.get('/api-key', (_req, res) => {
@@ -45,5 +46,18 @@ settingsRouter.delete('/context7', (_req, res) => {
         message: 'Context7 configuration removed',
         configured: false,
     });
+});
+// Free-tier-only mode (default ON): hides/blocks paid catalog rows.
+settingsRouter.get('/free-only-mode', (_req, res) => {
+    res.json({ freeOnlyMode: isFreeOnlyMode(getDb()) });
+});
+settingsRouter.put('/free-only-mode', (req, res) => {
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== 'boolean') {
+        res.status(400).json({ error: "Body must be { enabled: boolean }" });
+        return;
+    }
+    setFreeOnlyMode(getDb(), enabled);
+    res.json({ freeOnlyMode: isFreeOnlyMode(getDb()) });
 });
 //# sourceMappingURL=settings.js.map

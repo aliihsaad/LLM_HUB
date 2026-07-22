@@ -177,6 +177,18 @@ register(new OpenAICompatProvider({
   baseUrl: 'https://api.llm7.io/v1',
 }));
 
+// BazaarLink — OpenAI-compatible aggregator (keys start with sk-bl-). Bare
+// model ids are canonical (`glm-5.1`); `provider/model` aliases also work.
+// `auto:free` routes to zero-cost inference (4M tokens/day per account);
+// other catalog models bill against the key's credit. Frontier models via
+// an aggregator can be slow, so the timeout matches other aggregators.
+register(new OpenAICompatProvider({
+  platform: 'bazaarlink',
+  name: 'BazaarLink',
+  baseUrl: 'https://bazaarlink.ai/api/v1',
+  timeoutMs: 60000,
+}));
+
 // Chutes was evaluated for V11 and dropped: probe with a free-tier key
 // returned 402 on every model — "Quota exceeded and account balance is
 // $0.0, please pay with fiat or send tao". The "free" tier requires a

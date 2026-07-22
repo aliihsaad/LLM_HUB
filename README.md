@@ -222,6 +222,7 @@ Provider catalog is defined in `server/src/providers/index.ts`:
 - Kilo Gateway
 - Pollinations
 - LLM7
+- BazaarLink (`auto:free` = 4M tokens/day free; other models bill per-key credit)
 
 Capability availability varies by provider and key status. The dashboard shows
 live per-provider/per-capability health and configuration.

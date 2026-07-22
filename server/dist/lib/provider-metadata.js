@@ -20,6 +20,7 @@ export const PLATFORM_ORDER = [
     'kilo',
     'pollinations',
     'llm7',
+    'bazaarlink',
 ];
 export const PROVIDER_METADATA = {
     google: {
@@ -210,6 +211,15 @@ export const PROVIDER_METADATA = {
         consoleUrl: 'https://llm7.io/',
         apiBaseUrl: 'https://api.llm7.io/v1',
         requiresKey: false,
+    },
+    bazaarlink: {
+        platform: 'bazaarlink',
+        displayName: 'BazaarLink',
+        docsUrl: 'https://bazaarlink.ai',
+        keyUrl: 'https://bazaarlink.ai',
+        consoleUrl: 'https://bazaarlink.ai',
+        apiBaseUrl: 'https://bazaarlink.ai/api/v1',
+        requiresKey: true,
     },
 };
 export function listProviderMetadata() {

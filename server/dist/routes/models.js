@@ -91,6 +91,7 @@ modelsRouter.get('/', (_req, res) => {
         tpdLimit: m.tpd_limit,
         monthlyTokenBudget: m.monthly_token_budget,
         contextWindow: m.context_window,
+        isFree: m.is_free === 1,
         enabled: m.enabled === 1,
         priority: m.priority,
         fallbackEnabled: m.fallback_enabled === 1,
