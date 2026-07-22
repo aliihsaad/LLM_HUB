@@ -2,6 +2,7 @@ import { getDb } from '../db/index.js';
 import { getProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { canMakeRequest, canUseTokens, isOnCooldown } from './ratelimit.js';
+import { isFreeOnlyMode } from '../lib/app-settings.js';
 // Round-robin index per platform
 const roundRobinIndex = new Map();
 // ── Dynamic priority: track 429s per model and demote accordingly ──
@@ -192,6 +193,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys, preferredModelDbI
 }
 export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferredModelDbId, skipModelDbIds, category, platformFilter) {
     const db = getDb();
+    const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
     // Get fallback chain ordered by priority
     const categorySql = category
         ? `
@@ -209,6 +211,7 @@ export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferred
              WHERE any_mc.model_db_id = fc.model_db_id
            ))
         ${platformFilter ? 'AND m.platform = ?' : ''}
+        ${freeOnlyFragment}
       ORDER BY fc.priority ASC
     `
         : `
@@ -225,6 +228,7 @@ export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferred
            WHERE any_mc.model_db_id = fc.model_db_id
          ))
         ${platformFilter ? 'AND m.platform = ?' : ''}
+        ${freeOnlyFragment}
       ORDER BY fc.priority ASC
     `;
     const fallbackChain = category
@@ -316,6 +320,7 @@ export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferred
  */
 export function routeCapabilityRequest(capability, estimatedTokens = 1000, skipKeys, requestedModel, skipModelDbIds, platformFilter) {
     const db = getDb();
+    const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
     const capabilityRows = db.prepare(`
     SELECT mc.model_db_id, mc.priority, mc.enabled
     FROM model_capabilities mc
@@ -325,6 +330,7 @@ export function routeCapabilityRequest(capability, estimatedTokens = 1000, skipK
       AND m.enabled = 1
       AND (? IS NULL OR m.model_id = ?)
       ${platformFilter ? 'AND m.platform = ?' : ''}
+      ${freeOnlyFragment}
     ORDER BY mc.priority ASC, m.intelligence_rank ASC
   `).all(capability, requestedModel ?? null, requestedModel ?? null, ...(platformFilter ? [platformFilter] : []));
     for (const entry of capabilityRows) {

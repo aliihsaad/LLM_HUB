@@ -1,3 +1,4 @@
+import { getDb } from '../db/index.js';
 import type { Platform } from 'llmhub-shared/types.js';
 export interface AvailabilityCheck {
     modelDbId: number;
@@ -14,6 +15,7 @@ export interface DiscoveredModelCandidate {
     modelId: string;
     displayName: string;
     enabledByDefault?: boolean;
+    isFree?: boolean;
     capabilities?: DiscoveredModelCapability[];
 }
 export interface DiscoveredModelResult {
@@ -25,6 +27,25 @@ export interface DiscoveredModelResult {
     insertedModelIds: number[];
 }
 type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
+interface OpenAICompatModelListEntry {
+    id?: string;
+    name?: string;
+    context_length?: number | null;
+    architecture?: {
+        input_modalities?: string[];
+        output_modalities?: string[];
+        modality?: string;
+    };
+    pricing?: {
+        prompt?: string;
+        completion?: string;
+    };
+}
+/** BazaarLink sync keeps only zero-priced, chat-usable, text-output entries —
+ *  the 44 zero-"priced" image/video-gen models bill elsewhere and stay out. */
+export declare function isBazaarlinkFreeChatEntry(entry: OpenAICompatModelListEntry & {
+    context_length?: number | null;
+}): boolean;
 /**
  * Check if a specific model is still available on the free tier.
  *
@@ -37,6 +58,9 @@ type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
  * 404 = deprecated (model removed), transport error = error.
  */
 export declare function checkModelAvailability(modelDbId: number): Promise<AvailabilityCheck>;
+/** Enabled models eligible for the availability sweep. Paid rows are skipped
+ *  while free-only mode is on so probes never spend key credit. */
+export declare function selectSweepCandidateIds(db: ReturnType<typeof getDb>): number[];
 /**
  * Check all enabled models in batches with delays to avoid rate limits.
  */
@@ -52,6 +76,21 @@ export declare function discoverNewModels(): Promise<DiscoveredModelCandidate[]>
  * them as newly introduced catalog entries.
  */
 export declare function discoverAndPersistNewModels(): Promise<DiscoveredModelResult>;
+/**
+ * Re-verify pricing + presence for a pricing-bearing platform's existing rows.
+ * Only call with an authoritative (HTTP 200) upstream list — never on fetch
+ * errors, so transient failures cannot disable the catalog.
+ */
+export declare function applyPricingDrift(db: ReturnType<typeof getDb>, platform: Platform, entries: Array<{
+    id?: string;
+    pricing?: {
+        prompt?: string;
+        completion?: string;
+    };
+}>): {
+    becamePaid: string[];
+    wentMissing: string[];
+};
 export declare function startModelScout(): void;
 export declare function stopModelScout(): void;
 export {};
