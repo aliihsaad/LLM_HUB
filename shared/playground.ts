@@ -217,6 +217,26 @@ export function groupPlaygroundModelsByProvider<T extends { platform: string; di
     .sort((a, b) => a.platform.localeCompare(b.platform));
 }
 
+/**
+ * Build a human notice when the gateway served a different model than the one the
+ * user pinned. Returns null when there is nothing to report — no pin (`auto`/
+ * undefined), no served model yet, or the pinned model actually served. Fallback
+ * stays enabled by design; this only makes it visible instead of silent.
+ */
+export function describePlaygroundFallback(params: {
+  requestedModelId: string | undefined;
+  servedPlatform?: string;
+  servedModelId?: string;
+  reason?: string;
+}): string | null {
+  const { requestedModelId, servedPlatform, servedModelId, reason } = params;
+  if (!requestedModelId || requestedModelId === 'auto') return null;
+  if (!servedModelId || servedModelId === requestedModelId) return null;
+  const served = servedPlatform ? `${servedPlatform}/${servedModelId}` : servedModelId;
+  const base = `Selected model "${requestedModelId}" was unavailable — the request fell back to ${served}.`;
+  return reason ? `${base} (${reason})` : base;
+}
+
 export function getConfiguredProviderCount(response: CapabilitiesResponse | undefined, mode: PlaygroundCapabilityMode): number {
   if (!response) return 0;
   const capability = getPlaygroundMode(mode).capability;

@@ -1165,6 +1165,22 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   const skipModels = new Set<number>();
   let lastError: any = null;
 
+  // Surface fallback transparently: when an explicitly requested model is
+  // replaced by another (rate-limited, no healthy key, or upstream failure),
+  // echo the requested id + the reason so clients can show it instead of a
+  // silent substitution. Fallback itself stays enabled by design.
+  const setRoutingHeaders = (route: RouteResult, attempt: number) => {
+    res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+    if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+    if (requestedModel && preferredModel != null && route.modelDbId !== preferredModel) {
+      const reason = lastError?.message
+        ? String(lastError.message).slice(0, 200)
+        : 'requested model unavailable (rate-limited or no healthy key)';
+      res.setHeader('X-Requested-Model', requestedModel);
+      res.setHeader('X-Fallback-Reason', reason.replace(/[\r\n]+/g, ' '));
+    }
+  };
+
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     let route: RouteResult;
     try {
@@ -1219,8 +1235,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
               res.setHeader('Content-Type', 'text/event-stream');
               res.setHeader('Cache-Control', 'no-cache');
               res.setHeader('Connection', 'keep-alive');
-              res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-              if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+              setRoutingHeaders(route, attempt);
               streamStarted = true;
             }
             const text = chunk.choices[0]?.delta?.content ?? '';
@@ -1231,7 +1246,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           if (!streamStarted) {
             // Upstream returned no chunks — emit minimal successful stream.
             res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+            setRoutingHeaders(route, attempt);
           }
           res.write('data: [DONE]\n\n');
           res.end();
@@ -1268,8 +1283,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         recordSuccess(route.modelDbId);
         setStickyModel(messages, route.modelDbId);
 
-        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        setRoutingHeaders(route, attempt);
         res.json(result);
 
         logRequest(

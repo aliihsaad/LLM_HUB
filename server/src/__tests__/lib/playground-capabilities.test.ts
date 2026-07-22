@@ -7,6 +7,7 @@ import {
   getSupportedModelCount,
   filterPlaygroundModelsForMode,
   groupPlaygroundModelsByProvider,
+  describePlaygroundFallback,
   isPlaygroundModeConfigured,
   PLAYGROUND_MODES,
 } from 'llmhub-shared/playground.js';
@@ -134,6 +135,32 @@ describe('playground capability helpers', () => {
       'free-chat',
       'legacy-chat',
     ]);
+  });
+
+  it('describes a fallback only when a pinned model was replaced by a different one', () => {
+    // Auto / no pin → never a fallback notice.
+    expect(describePlaygroundFallback({ requestedModelId: 'auto', servedModelId: 'gemini-3.5-flash' })).toBeNull();
+    expect(describePlaygroundFallback({ requestedModelId: undefined, servedModelId: 'gemini-3.5-flash' })).toBeNull();
+
+    // Pinned model actually served → no notice.
+    expect(describePlaygroundFallback({ requestedModelId: 'glm-4.7-flash', servedModelId: 'glm-4.7-flash' })).toBeNull();
+
+    // Pinned model replaced by another → notice names both, and the reason when present.
+    const notice = describePlaygroundFallback({
+      requestedModelId: 'glm-4.7-flash',
+      servedPlatform: 'google',
+      servedModelId: 'gemini-3.5-flash',
+    });
+    expect(notice).toContain('glm-4.7-flash');
+    expect(notice).toContain('google/gemini-3.5-flash');
+
+    const withReason = describePlaygroundFallback({
+      requestedModelId: 'glm-4.7-flash',
+      servedPlatform: 'google',
+      servedModelId: 'gemini-3.5-flash',
+      reason: '429 rate limited',
+    });
+    expect(withReason).toContain('429 rate limited');
   });
 
   it('groups selector models by provider, sorted by platform then display name', () => {
