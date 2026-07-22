@@ -15,14 +15,51 @@ const CATALOG_SYNC_PLATFORMS = new Set([
 ]);
 const MAX_DISCOVERED_PER_PLATFORM = 100;
 const GOOGLE_MODELS_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+/** Google chat models confirmed free on the Gemini API (ai.google.dev pricing:
+ *  Free Tier column reads "Free of charge"). These auto-enable on discovery. */
 const GOOGLE_FREE_CHAT_MODELS = new Map([
+    ['gemini-3.6-flash', 'Gemini 3.6 Flash'],
     ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+    ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'],
     ['gemini-3-flash-preview', 'Gemini 3 Flash Preview'],
     ['gemini-2.5-pro', 'Gemini 2.5 Pro'],
     ['gemini-2.5-flash', 'Gemini 2.5 Flash'],
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
     ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite'],
 ]);
+/** Model families that are not chat completions — discovering them would only
+ *  add catalog noise (embeddings need provider support; video/music/robotics
+ *  are different surfaces entirely). */
+const GOOGLE_NON_CHAT_PATTERN = /embedding|^veo-|^lyria-|^imagen|robotics|computer-use|deep-research|antigravity|^nano-banana/i;
+/**
+ * Decide what to do with a Google model returned by /v1beta/models.
+ *
+ * Google's list endpoint carries no pricing, so we cannot classify cost the way
+ * we do for providers that publish it. Instead of the old behaviour — a
+ * hardcoded allowlist that made every newly released model structurally
+ * invisible — an unrecognised chat model is now surfaced DISABLED and marked
+ * paid. It shows up in the dashboard for review and can never auto-route or
+ * spend until an operator confirms it.
+ */
+export function classifyGoogleModel(modelId, apiDisplayName) {
+    const knownFree = GOOGLE_FREE_CHAT_MODELS.get(modelId);
+    if (knownFree) {
+        return {
+            include: true,
+            displayName: apiDisplayName ?? knownFree,
+            enabledByDefault: true,
+            isFree: true,
+        };
+    }
+    if (GOOGLE_NON_CHAT_PATTERN.test(modelId))
+        return { include: false };
+    return {
+        include: true,
+        displayName: apiDisplayName ?? modelId,
+        enabledByDefault: false,
+        isFree: false,
+    };
+}
 function isZeroPrice(value) {
     if (value == null)
         return false;
@@ -64,15 +101,18 @@ async function discoverGoogleModels(apiKey, knownSet) {
             continue;
         if (!entry.supportedGenerationMethods?.includes('generateContent'))
             continue;
-        const displayName = GOOGLE_FREE_CHAT_MODELS.get(modelId);
-        if (!displayName)
+        const verdict = classifyGoogleModel(modelId, entry.displayName);
+        if (!verdict.include)
             continue;
         discoveries.push({
             platform: 'google',
             modelId,
-            displayName: entry.displayName ?? displayName,
-            enabledByDefault: true,
-            capabilities: ['chat', 'vision', 'video'],
+            displayName: verdict.displayName,
+            enabledByDefault: verdict.enabledByDefault,
+            isFree: verdict.isFree,
+            // Vision/video are only claimed for models we have actually confirmed;
+            // an unrecognised model gets plain chat until an operator reviews it.
+            capabilities: verdict.enabledByDefault ? ['chat', 'vision', 'video'] : ['chat'],
         });
     }
     return discoveries;

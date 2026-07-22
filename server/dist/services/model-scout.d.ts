@@ -26,6 +26,25 @@ export interface DiscoveredModelResult {
     skippedKnownCount: number;
     insertedModelIds: number[];
 }
+export type GoogleModelVerdict = {
+    include: false;
+} | {
+    include: true;
+    displayName: string;
+    enabledByDefault: boolean;
+    isFree: boolean;
+};
+/**
+ * Decide what to do with a Google model returned by /v1beta/models.
+ *
+ * Google's list endpoint carries no pricing, so we cannot classify cost the way
+ * we do for providers that publish it. Instead of the old behaviour — a
+ * hardcoded allowlist that made every newly released model structurally
+ * invisible — an unrecognised chat model is now surfaced DISABLED and marked
+ * paid. It shows up in the dashboard for review and can never auto-route or
+ * spend until an operator confirms it.
+ */
+export declare function classifyGoogleModel(modelId: string, apiDisplayName?: string): GoogleModelVerdict;
 type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
 interface OpenAICompatModelListEntry {
     id?: string;

@@ -46,6 +46,7 @@ export async function initDb(dbPath) {
     migrateModelsV15(db);
     migrateModelsV16(db);
     migrateModelsV17(db);
+    migrateModelsV18(db);
     seedModelCapabilities(db);
     // Must follow seedModelCapabilities — that is where the image rows are seeded.
     flagPaidGoogleModels(db);
@@ -1417,6 +1418,23 @@ function migrateModelsV17(db) {
         }
     });
     apply();
+}
+/**
+ * V18 (July 2026): retire the Google Gemma rows.
+ *
+ * Gemma 4 is free on the Gemini API and — now that the cross-provider model_id
+ * collision in resolveRoutableModel is fixed — genuinely reachable. It is still
+ * disabled by default because it answers by emitting raw chain-of-thought
+ * ("The user said 'say ok'. The user wants me to output...") rather than the
+ * answer, which is poor behaviour for a model sitting in the auto-route
+ * fallback chain. Operators can enable it from the dashboard.
+ *
+ * Rows are disabled, never deleted. A fresh install never seeds them, so this
+ * only affects databases that briefly had them enabled.
+ */
+function migrateModelsV18(db) {
+    const disable = db.prepare("UPDATE models SET enabled = 0 WHERE platform = 'google' AND model_id IN ('gemma-4-31b-it', 'gemma-4-26b-a4b-it')");
+    disable.run();
 }
 /**
  * Mark Google models that have no free tier (verified 2026-07-22 against

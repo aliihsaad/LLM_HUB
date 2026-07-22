@@ -19,10 +19,26 @@ export function resolveRoutableModel(
   modelId: string,
   requiredCapability?: string | null,
 ): Resolution {
+  // The same model_id can exist on several providers (e.g. an aggregator's
+  // auto-discovered `gemma-4-31b-it` alongside Google's own). A bare `.get()`
+  // returned whichever row had the lowest id, so a disabled/paid duplicate
+  // could shadow a perfectly routable one. Rank the candidates instead:
+  // enabled first, then providers that actually have a usable key, then free.
   const row = db.prepare(`
-    SELECT m.id, m.enabled AS model_enabled, m.is_free
+    SELECT m.id, m.enabled AS model_enabled, m.is_free,
+           COUNT(ak.id) AS key_count
     FROM models m
+    LEFT JOIN api_keys ak
+      ON ak.platform = m.platform
+      AND ak.enabled = 1
+      AND ak.status != 'invalid'
     WHERE m.model_id = ?
+    GROUP BY m.id
+    ORDER BY (m.enabled = 1) DESC,
+             (COUNT(ak.id) > 0) DESC,
+             (m.is_free = 1) DESC,
+             m.id ASC
+    LIMIT 1
   `).get(modelId) as { id: number; model_enabled: number; is_free: number } | undefined;
 
   if (!row) return { kind: 'not_found' };
