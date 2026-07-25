@@ -490,16 +490,17 @@ type ParsedImageRequest =
   | { ok: false; message: string };
 
 function authenticateProxyRequest(req: Request, res: Response): boolean {
-  // Authenticate with unified API key. Local requests (127.0.0.1) skip the check
-  // since they came from the same machine running the server. Non-local requests
-  // MUST present a valid Bearer token — missing or wrong → 401.
-  //
-  // Note: req.ip is the actual TCP socket peer because we never set
-  // `trust proxy`, so X-Forwarded-For cannot spoof a localhost identity.
-  // If a future change enables `trust proxy`, this localhost bypass MUST be
-  // re-evaluated.
+  // Direct loopback requests may skip the key check. Reverse-proxied public
+  // requests also arrive from 127.0.0.1, but Caddy adds forwarding headers;
+  // those requests must still authenticate with the unified API key.
+  // `trust proxy` stays disabled, so forwarding headers never control req.ip.
   const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
-  if (isLocal) return true;
+  const isForwarded = Boolean(
+    req.headers['x-forwarded-for']
+    || req.headers['x-forwarded-proto']
+    || req.headers.forwarded,
+  );
+  if (isLocal && !isForwarded) return true;
 
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
   const unifiedKey = getUnifiedApiKey();
