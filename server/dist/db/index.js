@@ -48,6 +48,7 @@ export async function initDb(dbPath) {
     migrateModelsV17(db);
     migrateModelsV18(db);
     migrateModelsV19(db);
+    migrateModelsV20(db);
     seedModelCapabilities(db);
     // Must follow seedModelCapabilities — that is where the image rows are seeded.
     flagPaidGoogleModels(db);
@@ -485,7 +486,7 @@ function migrateModelsV4(db) {
         ['openrouter', 'meta-llama/llama-3.3-70b-instruct:free', 'Llama 3.3 70B (free)', 17, 9, 'Medium', 20, 200, null, null, '~6M', 131072],
         // SambaNova — 20 RPM / 20 RPD / 200K TPD shared free Developer tier
         ['sambanova', 'DeepSeek-V3.1', 'DeepSeek V3.1', 5, 9, 'Frontier', 20, 20, null, 200000, '~3M', 131072],
-        ['sambanova', 'DeepSeek-V3.2', 'DeepSeek V3.2', 4, 9, 'Frontier', 20, 20, null, 200000, '~3M', 131072],
+        ['sambanova', 'DeepSeek-V3.2', 'DeepSeek V3.2', 4, 9, 'Frontier', 20, 20, null, 200000, '~3M', 32768],
         ['sambanova', 'Llama-4-Maverick-17B-128E-Instruct', 'Llama 4 Maverick', 11, 9, 'Large', 20, 20, null, 200000, '~3M', 8192],
         ['sambanova', 'gpt-oss-120b', 'GPT-OSS 120B (SambaNova)', 6, 9, 'Large', 20, 20, null, 200000, '~3M', 131072],
         // Groq — very fast; 30 RPM per model, 1000 RPD on most, 14.4k on the 8B
@@ -1498,6 +1499,15 @@ function migrateModelsV18(db) {
  */
 function migrateModelsV19(db) {
     db.prepare("UPDATE models SET enabled = 0 WHERE platform = 'ollama' AND model_id = 'qwen3-coder:480b'").run();
+}
+/**
+ * V20 (July 2026): correct SambaNova DeepSeek V3.2's live provider limit.
+ * The API rejects requests over 32,768 tokens even though the original catalog
+ * row advertised 131,072. Keeping the smaller verified limit prevents auto
+ * routing from selecting a model that cannot accept the request.
+ */
+function migrateModelsV20(db) {
+    db.prepare("UPDATE models SET context_window = 32768 WHERE platform = 'sambanova' AND model_id = 'DeepSeek-V3.2'").run();
 }
 /**
  * Mark Google models that have no free tier (verified 2026-07-22 against

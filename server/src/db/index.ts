@@ -54,6 +54,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   migrateModelsV17(db);
   migrateModelsV18(db);
   migrateModelsV19(db);
+  migrateModelsV20(db);
   seedModelCapabilities(db);
   // Must follow seedModelCapabilities — that is where the image rows are seeded.
   flagPaidGoogleModels(db);
@@ -513,7 +514,7 @@ function migrateModelsV4(db: Database.Database) {
 
     // SambaNova — 20 RPM / 20 RPD / 200K TPD shared free Developer tier
     ['sambanova',  'DeepSeek-V3.1',                          'DeepSeek V3.1',                 5,  9,  'Frontier', 20, 20,  null, 200000, '~3M', 131072],
-    ['sambanova',  'DeepSeek-V3.2',                          'DeepSeek V3.2',                 4,  9,  'Frontier', 20, 20,  null, 200000, '~3M', 131072],
+    ['sambanova',  'DeepSeek-V3.2',                          'DeepSeek V3.2',                 4,  9,  'Frontier', 20, 20,  null, 200000, '~3M', 32768],
     ['sambanova',  'Llama-4-Maverick-17B-128E-Instruct',     'Llama 4 Maverick',              11, 9,  'Large',    20, 20,  null, 200000, '~3M', 8192],
     ['sambanova',  'gpt-oss-120b',                           'GPT-OSS 120B (SambaNova)',      6,  9,  'Large',    20, 20,  null, 200000, '~3M', 131072],
 
@@ -1710,6 +1711,18 @@ function migrateModelsV18(db: Database.Database) {
 function migrateModelsV19(db: Database.Database) {
   db.prepare(
     "UPDATE models SET enabled = 0 WHERE platform = 'ollama' AND model_id = 'qwen3-coder:480b'",
+  ).run();
+}
+
+/**
+ * V20 (July 2026): correct SambaNova DeepSeek V3.2's live provider limit.
+ * The API rejects requests over 32,768 tokens even though the original catalog
+ * row advertised 131,072. Keeping the smaller verified limit prevents auto
+ * routing from selecting a model that cannot accept the request.
+ */
+function migrateModelsV20(db: Database.Database) {
+  db.prepare(
+    "UPDATE models SET context_window = 32768 WHERE platform = 'sambanova' AND model_id = 'DeepSeek-V3.2'",
   ).run();
 }
 
