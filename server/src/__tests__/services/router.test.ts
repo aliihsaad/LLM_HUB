@@ -139,4 +139,44 @@ describe('Router', () => {
 
     expect(() => routeCapabilityRequest('embeddings')).toThrow(/embeddings|exhausted/i);
   });
+
+  it('should skip chat models whose context window is smaller than the request', () => {
+    const db = getDb();
+    const key = encrypt('test-groq-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('groq', 'context-test', key.encrypted, key.iv, key.authTag, 'healthy', 1);
+
+    db.prepare('UPDATE fallback_config SET enabled = 0').run();
+    const insertModel = db.prepare(`
+      INSERT INTO models (
+        platform, model_id, display_name, intelligence_rank,
+        speed_rank, size_label, context_window, enabled
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    `);
+    const small = insertModel.run(
+      'groq', 'test-small-context', 'Test Small Context', 1, 1, 'Small', 32768,
+    );
+    const large = insertModel.run(
+      'groq', 'test-large-context', 'Test Large Context', 2, 1, 'Large', 131072,
+    );
+    const addFallback = db.prepare(
+      'INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)',
+    );
+    addFallback.run(Number(small.lastInsertRowid), 1);
+    addFallback.run(Number(large.lastInsertRowid), 2);
+
+    expect(routeRequest(81_000).modelId).toBe('test-large-context');
+  });
+
+  it('should use SambaNova DeepSeek V3.2 provider-enforced context window', () => {
+    const row = getDb().prepare(`
+      SELECT context_window
+      FROM models
+      WHERE platform = 'sambanova' AND model_id = 'DeepSeek-V3.2'
+    `).get() as { context_window: number };
+
+    expect(row.context_window).toBe(32768);
+  });
 });

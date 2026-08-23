@@ -77,6 +77,17 @@ function estimateChatContentTokens(content) {
         return sum + 1000;
     }, 0);
 }
+function estimateStructuredTokens(value) {
+    if (value == null)
+        return 0;
+    try {
+        // JSON-heavy tool schemas tokenize more densely than natural language.
+        return Math.ceil(JSON.stringify(value).length / 3);
+    }
+    catch {
+        return 0;
+    }
+}
 function getStickyModel(messages) {
     // Only apply sticky for multi-turn (has assistant messages = continuation)
     const hasAssistant = messages.some(m => m.role === 'assistant');
@@ -966,7 +977,9 @@ proxyRouter.post('/chat/completions', async (req, res) => {
     // Non-streaming requests reconcile against the provider's real `usage` block
     // (see line ~340). Streaming will drift from real consumption — accepted
     // tradeoff because per-request usage isn't always returned mid-stream.
-    const estimatedInputTokens = messages.reduce((sum, m) => sum + estimateChatContentTokens(m.content), 0);
+    const estimatedInputTokens = messages.reduce((sum, m) => sum
+        + estimateChatContentTokens(m.content)
+        + estimateStructuredTokens(m.role === 'assistant' ? m.tool_calls : undefined), 0) + estimateStructuredTokens(tools);
     const estimatedTotal = estimatedInputTokens + (max_tokens ?? 1000);
     const needsVision = requiresVision(messages);
     const needsVideo = requiresVideo(messages);

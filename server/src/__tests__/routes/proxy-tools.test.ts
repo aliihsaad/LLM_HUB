@@ -173,4 +173,68 @@ describe('Proxy tool-calling support', () => {
     expect(providerBody.messages[2].tool_call_id).toBe('call_weather_1');
     expect(body.choices[0].message.content).toContain('30C');
   });
+
+  it('includes tool schemas when choosing a model context window', async () => {
+    const db = getDb();
+    db.prepare('UPDATE fallback_config SET enabled = 0').run();
+    const insertModel = db.prepare(`
+      INSERT INTO models (
+        platform, model_id, display_name, intelligence_rank,
+        speed_rank, size_label, context_window, enabled
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    `);
+    const small = insertModel.run(
+      'groq', 'test-tool-small', 'Test Tool Small', 1, 1, 'Small', 32768,
+    );
+    const large = insertModel.run(
+      'groq', 'test-tool-large', 'Test Tool Large', 2, 1, 'Large', 131072,
+    );
+    const addFallback = db.prepare(
+      'INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)',
+    );
+    addFallback.run(Number(small.lastInsertRowid), 1);
+    addFallback.run(Number(large.lastInsertRowid), 2);
+
+    const origFetch = global.fetch;
+    let providerBody: any = null;
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
+        providerBody = JSON.parse((init as any).body);
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'chatcmpl-context-route',
+            object: 'chat.completion',
+            created: 123,
+            model: providerBody.model,
+            choices: [{
+              index: 0,
+              message: { role: 'assistant', content: 'ok' },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 50_000, completion_tokens: 1, total_tokens: 50_001 },
+          }),
+        } as any;
+      }
+      return origFetch(url, init);
+    });
+
+    const { status } = await request(app, 'POST', '/v1/chat/completions', {
+      model: 'auto',
+      messages: [{ role: 'user', content: 'Reply ok.' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'large_schema_tool',
+          description: 'x'.repeat(200_000),
+          parameters: { type: 'object', properties: {} },
+        },
+      }],
+      max_tokens: 1_000,
+    });
+
+    expect(status).toBe(200);
+    expect(providerBody.model).toBe('test-tool-large');
+  });
 });

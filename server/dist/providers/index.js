@@ -26,11 +26,18 @@ register(new OpenAICompatProvider({
     name: 'SambaNova',
     baseUrl: 'https://api.sambanova.ai/v1',
 }));
-// NVIDIA NIM - OpenAI-compatible
+// NVIDIA NIM - OpenAI-compatible. The catalog is almost entirely large models
+// (70B Llamas, 120B/550B Nemotrons, DeepSeek/Kimi/MiniMax frontier tiers) and
+// the shared free-credit pool is not latency-guaranteed, so first token
+// regularly lands past the 15s default — meta/llama-3.1-70b-instruct was
+// failing with "This operation was aborted". Worse, classifyProviderError maps
+// an abort to a 120s key cooldown, so one slow request benched the whole
+// provider. Bumped to the 60s used by the other slow cloud providers.
 register(new OpenAICompatProvider({
     platform: 'nvidia',
     name: 'NVIDIA NIM',
     baseUrl: 'https://integrate.api.nvidia.com/v1',
+    timeoutMs: 60000,
 }));
 // Mistral - OpenAI-compatible
 register(new OpenAICompatProvider({

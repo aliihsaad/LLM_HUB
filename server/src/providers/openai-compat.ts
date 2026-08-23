@@ -80,7 +80,7 @@ export class OpenAICompatProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`${this.name} API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as ChatCompletionResponse;
@@ -118,7 +118,7 @@ export class OpenAICompatProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`${this.name} API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const reader = res.body?.getReader();
@@ -178,7 +178,7 @@ export class OpenAICompatProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`${this.name} API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as EmbeddingResponse;
@@ -295,7 +295,7 @@ export class OpenAICompatProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`${this.name} API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const contentType = res.headers.get('content-type') ?? `audio/${request.response_format ?? 'wav'}`;
@@ -347,7 +347,7 @@ export class OpenAICompatProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`${this.name} API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const contentType = res.headers.get('content-type') ?? 'application/json';
@@ -392,7 +392,7 @@ export class OpenAICompatProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`${this.name} API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as OpenRouterImageResponse;
@@ -429,6 +429,42 @@ interface OpenRouterImageResponse {
     };
   }>;
   error?: { message?: string };
+}
+
+/**
+ * Extract the most useful human-readable text from a failed response body.
+ *
+ * Most OpenAI-compatible providers answer `{ error: { message } }`, but NVIDIA
+ * NIM returns RFC 7807 problem+json — `{ type, title, status, detail }` — with
+ * no `error` key at all. Reading only `error.message` therefore fell through to
+ * `res.statusText`, so a retirement that upstream explains in full ("The model
+ * 'minimaxai/minimax-m2.7' has reached its end of life on 2026-07-27...")
+ * surfaced in the dashboard as the useless "NVIDIA NIM API error 410: Gone".
+ *
+ * Checked in order of specificity; `detail`/`title` cover problem+json, bare
+ * `message`/`detail` cover the aggregators that skip the `error` envelope.
+ */
+function readProviderErrorText(body: unknown, statusText: string): string {
+  if (!body || typeof body !== 'object') return statusText;
+  const b = body as Record<string, unknown>;
+
+  const error = b.error;
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+
+  // RFC 7807: prefer `detail` (the explanation), fall back to `title` (the
+  // status phrase). Both present → "Gone: The model ... end of life ...".
+  const detail = typeof b.detail === 'string' && b.detail.trim() ? b.detail : undefined;
+  const title = typeof b.title === 'string' && b.title.trim() ? b.title : undefined;
+  if (detail) return title && title !== detail ? `${title}: ${detail}` : detail;
+
+  const message = typeof b.message === 'string' && b.message.trim() ? b.message : undefined;
+  if (message) return message;
+
+  return title ?? statusText;
 }
 
 function throwIfOpenAIErrorBody(providerName: string, data: unknown): void {

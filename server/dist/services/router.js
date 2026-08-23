@@ -258,6 +258,8 @@ export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferred
         const model = db.prepare('SELECT * FROM models WHERE id = ? AND enabled = 1').get(entry.model_db_id);
         if (!model)
             continue;
+        if (model.context_window && estimatedTokens > model.context_window)
+            continue;
         // Check if we have a provider for this platform
         const provider = getProvider(model.platform);
         if (!provider)
@@ -342,6 +344,8 @@ export function routeCapabilityRequest(capability, estimatedTokens = 1000, skipK
             continue;
         const model = db.prepare('SELECT * FROM models WHERE id = ? AND enabled = 1').get(entry.model_db_id);
         if (!model)
+            continue;
+        if (model.context_window && estimatedTokens > model.context_window)
             continue;
         const provider = getProvider(model.platform);
         if (!provider)

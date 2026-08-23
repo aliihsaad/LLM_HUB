@@ -14,6 +14,7 @@ interface ModelRow {
   rpd_limit: number | null;
   tpm_limit: number | null;
   tpd_limit: number | null;
+  context_window: number | null;
 }
 
 interface KeyRow {
@@ -375,6 +376,7 @@ export function routeRequestInternal(
     // Get model details
     const model = db.prepare('SELECT * FROM models WHERE id = ? AND enabled = 1').get(entry.model_db_id) as ModelRow | undefined;
     if (!model) continue;
+    if (model.context_window && estimatedTokens > model.context_window) continue;
 
     // Check if we have a provider for this platform
     const provider = getProvider(model.platform as any);
@@ -477,6 +479,7 @@ export function routeCapabilityRequest(
 
     const model = db.prepare('SELECT * FROM models WHERE id = ? AND enabled = 1').get(entry.model_db_id) as ModelRow | undefined;
     if (!model) continue;
+    if (model.context_window && estimatedTokens > model.context_window) continue;
 
     const provider = getProvider(model.platform as any);
     if (!provider) continue;
