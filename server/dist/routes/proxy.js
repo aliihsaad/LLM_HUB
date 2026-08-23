@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import express, { Router } from 'express';
 import { z } from 'zod';
 import { routeCapabilityRequest, routeRequest, recordModelFailure, recordRateLimitHit, recordSuccess, } from '../services/router.js';
-import { recordRequest, recordTokens, setCooldown } from '../services/ratelimit.js';
+import { recordRequest, recordTokens, setCooldown, setKeyCooldown } from '../services/ratelimit.js';
 import { canRetryProviderFailure, classifyProviderError, } from '../services/provider-errors.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { hasProvider } from '../providers/index.js';
@@ -668,7 +668,12 @@ function prepareProviderRetry(route, failure, err, skipKeys, skipModels) {
     const skipId = `${route.platform}:${route.modelId}:${route.keyId}`;
     skipKeys.add(skipId);
     if (failure.keyCooldownMs > 0) {
-        setCooldown(route.platform, route.modelId, route.keyId, failure.keyCooldownMs);
+        if (failure.cooldownScope === 'key') {
+            setKeyCooldown(route.platform, route.keyId, failure.keyCooldownMs);
+        }
+        else {
+            setCooldown(route.platform, route.modelId, route.keyId, failure.keyCooldownMs);
+        }
     }
     if (failure.skipModel) {
         skipModels.add(route.modelDbId);
