@@ -994,6 +994,10 @@ proxyRouter.post('/chat/completions', async (req, res) => {
     // different model would be surprising to OpenAI-compatible clients.
     // Sticky-session is the fallback when no `model` field was sent at all.
     let preferredModel;
+    // Set only when the client named a model itself. Passed to the router so the
+    // Fallback Chain's enabled toggle — which governs automatic routing — cannot
+    // veto a deliberate pin and quietly substitute a different model.
+    let pinnedModel;
     if (requestedModel) {
         const db = getDb();
         const resolution = resolveRoutableModel(db, requestedModel, requiredCapability);
@@ -1002,6 +1006,7 @@ proxyRouter.post('/chat/completions', async (req, res) => {
             return;
         }
         preferredModel = resolution.id;
+        pinnedModel = resolution.id;
     }
     else if (!requiredCapability) {
         preferredModel = getStickyModel(messages);
@@ -1019,9 +1024,13 @@ proxyRouter.post('/chat/completions', async (req, res) => {
         if (attempt > 0)
             res.setHeader('X-Fallback-Attempts', String(attempt));
         if (requestedModel && preferredModel != null && route.modelDbId !== preferredModel) {
+            // Without an upstream error the model was skipped before dispatch, so
+            // name every reason that can do that rather than only two — the old
+            // wording sent people hunting for key and rate-limit problems when the
+            // cause was a runtime-health block or a context-window mismatch.
             const reason = lastError?.message
                 ? String(lastError.message).slice(0, 200)
-                : 'requested model unavailable (rate-limited or no healthy key)';
+                : 'requested model was skipped before dispatch (no healthy key, rate/quota limit, runtime-health block, or context window too small)';
             res.setHeader('X-Requested-Model', requestedModel);
             res.setHeader('X-Fallback-Reason', reason.replace(/[\r\n]+/g, ' '));
         }
@@ -1031,7 +1040,7 @@ proxyRouter.post('/chat/completions', async (req, res) => {
         try {
             route = requiredCapability
                 ? routeCapabilityRequest(requiredCapability, estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, requestedModel, skipModels.size > 0 ? skipModels : undefined)
-                : routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, skipModels.size > 0 ? skipModels : undefined);
+                : routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, skipModels.size > 0 ? skipModels : undefined, undefined, undefined, pinnedModel);
         }
         catch (err) {
             // No more models available

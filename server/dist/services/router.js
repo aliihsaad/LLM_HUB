@@ -188,10 +188,19 @@ export function getAllPenalties() {
  * @param skipKeys - set of "platform:modelId:keyId" to skip (failed on this request)
  * @param preferredModelDbId - try this model first (sticky session)
  */
-export function routeRequest(estimatedTokens = 1000, skipKeys, preferredModelDbId, skipModelDbIds, category, platformFilter) {
-    return routeRequestInternal(estimatedTokens, skipKeys, preferredModelDbId, skipModelDbIds, category, platformFilter);
+export function routeRequest(estimatedTokens = 1000, skipKeys, preferredModelDbId, skipModelDbIds, category, platformFilter, pinnedModelDbId) {
+    return routeRequestInternal(estimatedTokens, skipKeys, preferredModelDbId, skipModelDbIds, category, platformFilter, pinnedModelDbId);
 }
-export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferredModelDbId, skipModelDbIds, category, platformFilter) {
+export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferredModelDbId, skipModelDbIds, category, platformFilter, 
+/**
+ * Model the caller named explicitly in the request body. `fallback_config`
+ * controls participation in AUTOMATIC fallback, so it must not veto a
+ * deliberate pin — otherwise naming a model that is merely switched off in
+ * the Fallback Chain silently serves a different one. Distinct from
+ * `preferredModelDbId`, which also carries the implicit sticky-session
+ * choice and does stay subject to the toggle.
+ */
+pinnedModelDbId) {
     const db = getDb();
     const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
     // Get fallback chain ordered by priority
@@ -248,7 +257,7 @@ export function routeRequestInternal(estimatedTokens = 1000, skipKeys, preferred
         }
     }
     for (const entry of sortedChain) {
-        if (!entry.enabled)
+        if (!entry.enabled && entry.model_db_id !== pinnedModelDbId)
             continue;
         if (skipModelDbIds?.has(entry.model_db_id))
             continue;
