@@ -3,7 +3,7 @@ import type {
   ChatCompletionResponse,
   ChatCompletionChunk,
 } from 'llmhub-shared/types.js';
-import { BaseProvider, type CompletionOptions } from './base.js';
+import { BaseProvider, readProviderErrorText, type CompletionOptions } from './base.js';
 
 /**
  * Cloudflare Workers AI provider.
@@ -13,6 +13,9 @@ import { BaseProvider, type CompletionOptions } from './base.js';
 export class CloudflareProvider extends BaseProvider {
   readonly platform = 'cloudflare' as const;
   readonly name = 'Cloudflare Workers AI';
+  // 7 of its 9 enabled catalog rows are Frontier/Large models on shared
+  // Workers AI capacity, where cold starts are common.
+  protected defaultTimeoutMs = 60000;
 
   private parseKey(apiKey: string): { accountId: string; token: string } {
     const sep = apiKey.indexOf(':');
@@ -57,7 +60,7 @@ export class CloudflareProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Cloudflare API error ${res.status}: ${(err as any).error?.message ?? (err as any).errors?.[0]?.message ?? res.statusText}`);
+      throw new Error(`Cloudflare API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as ChatCompletionResponse;
@@ -95,7 +98,7 @@ export class CloudflareProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Cloudflare API error ${res.status}: ${(err as any).error?.message ?? (err as any).errors?.[0]?.message ?? res.statusText}`);
+      throw new Error(`Cloudflare API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const reader = res.body?.getReader();
