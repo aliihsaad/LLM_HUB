@@ -20,7 +20,7 @@ import type {
   SpeechResult,
   TokenUsage,
 } from 'llmhub-shared/types.js';
-import { BaseProvider, type CompletionOptions } from './base.js';
+import { BaseProvider, readProviderErrorText, type CompletionOptions } from './base.js';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const API_BASE_V1ALPHA = 'https://generativelanguage.googleapis.com/v1alpha';
@@ -546,6 +546,9 @@ function extractText(parts: GeminiPart[] | undefined): string | null {
 export class GoogleProvider extends BaseProvider {
   readonly platform = 'google' as const;
   readonly name = 'Google AI Studio';
+  // Gemini reasoning/thinking models regularly pass 15s, and 503 "high
+  // demand" retries stack on top. 67 aborts logged in production.
+  protected defaultTimeoutMs = 60000;
 
   async chatCompletion(
     apiKey: string,
@@ -576,7 +579,7 @@ export class GoogleProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as GeminiResponse;
@@ -684,7 +687,7 @@ export class GoogleProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as GeminiResponse;
@@ -756,7 +759,7 @@ export class GoogleProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as GeminiResponse;
@@ -801,7 +804,7 @@ export class GoogleProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as GeminiResponse;
@@ -884,7 +887,7 @@ export class GoogleProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const data = await res.json() as GeminiAuthTokenResponse;
@@ -949,7 +952,7 @@ export class GoogleProvider extends BaseProvider {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
     }
 
     const reader = res.body?.getReader();

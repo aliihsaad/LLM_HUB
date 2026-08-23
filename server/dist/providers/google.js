@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import { BaseProvider } from './base.js';
+import { BaseProvider, readProviderErrorText } from './base.js';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const API_BASE_V1ALPHA = 'https://generativelanguage.googleapis.com/v1alpha';
 const GEMINI_LIVE_CONSTRAINED_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
@@ -428,6 +428,9 @@ function extractText(parts) {
 export class GoogleProvider extends BaseProvider {
     platform = 'google';
     name = 'Google AI Studio';
+    // Gemini reasoning/thinking models regularly pass 15s, and 503 "high
+    // demand" retries stack on top. 67 aborts logged in production.
+    defaultTimeoutMs = 60000;
     async chatCompletion(apiKey, messages, modelId, options) {
         const { contents, systemInstruction } = await toGeminiContents(messages);
         const body = {
@@ -450,7 +453,7 @@ export class GoogleProvider extends BaseProvider {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Google API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const data = await res.json();
         const candidate = data.candidates?.[0];
@@ -513,7 +516,7 @@ export class GoogleProvider extends BaseProvider {
         }, 120000);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Google API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const data = await res.json();
         const parts = data.candidates?.[0]?.content?.parts ?? [];
@@ -574,7 +577,7 @@ export class GoogleProvider extends BaseProvider {
         }, 120000);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Google API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const data = await res.json();
         const transcript = extractText(data.candidates?.[0]?.content?.parts)?.trim();
@@ -610,7 +613,7 @@ export class GoogleProvider extends BaseProvider {
         }, 120000);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Google API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const data = await res.json();
         const audioPart = data.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.data);
@@ -679,7 +682,7 @@ export class GoogleProvider extends BaseProvider {
         }, 15000);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Google API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const data = await res.json();
         const token = data.name ?? data.authToken?.name;
@@ -733,7 +736,7 @@ export class GoogleProvider extends BaseProvider {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Google API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Google API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const reader = res.body?.getReader();
         if (!reader)

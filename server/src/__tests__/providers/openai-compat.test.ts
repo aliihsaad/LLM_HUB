@@ -609,3 +609,70 @@ describe('provider error body extraction', () => {
     await expect(call(nvidia())).rejects.toThrow('NVIDIA NIM API error 400: model is required');
   });
 });
+
+describe('nested 2xx error bodies', () => {
+  // OpenRouter reports upstream failures as HTTP 200 with an `error` object
+  // and often omits `message`, putting the reason in `metadata.raw`. 531 of
+  // the VPS's 682 OpenRouter failures logged as the opaque
+  // "OpenRouter API error 429: Provider returned error".
+  function mockOkBody(body: unknown) {
+    vi.spyOn(global, 'fetch').mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: () => Promise.resolve(body),
+    } as any));
+  }
+
+  const openrouter = () => new OpenAICompatProvider({
+    platform: 'openrouter',
+    name: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+  });
+
+  const call = (p: OpenAICompatProvider) =>
+    p.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model');
+
+  it('surfaces metadata.raw when the error object has no message', async () => {
+    mockOkBody({
+      error: {
+        code: 429,
+        metadata: { provider_name: 'Targon', raw: 'Rate limit exceeded: free-models-per-day' },
+      },
+    });
+
+    await expect(call(openrouter())).rejects.toThrow(
+      'OpenRouter API error 429: Targon: Rate limit exceeded: free-models-per-day',
+    );
+  });
+
+  it('reads a structured metadata.raw object', async () => {
+    mockOkBody({
+      error: { code: 502, metadata: { raw: { message: 'upstream exploded' } } },
+    });
+
+    await expect(call(openrouter())).rejects.toThrow('OpenRouter API error 502: upstream exploded');
+  });
+
+  it('names the upstream provider when only that is given', async () => {
+    mockOkBody({ error: { code: 503, metadata: { provider_name: 'Chutes' } } });
+    await expect(call(openrouter())).rejects.toThrow(
+      'OpenRouter API error 503: upstream Chutes returned an error',
+    );
+  });
+
+  it('still prefers an explicit message over metadata', async () => {
+    mockOkBody({
+      error: { code: 400, message: 'context length exceeded', metadata: { raw: 'ignore me' } },
+    });
+
+    await expect(call(openrouter())).rejects.toThrow(
+      'OpenRouter API error 400: context length exceeded',
+    );
+  });
+
+  it('falls back to the generic text when nothing usable is present', async () => {
+    mockOkBody({ error: { code: 500 } });
+    await expect(call(openrouter())).rejects.toThrow('OpenRouter API error 500: Provider returned error');
+  });
+});

@@ -8,7 +8,9 @@ function register(provider) {
 }
 // Google - unique Gemini API format
 register(new GoogleProvider());
-// Groq - OpenAI-compatible
+// Groq - OpenAI-compatible. Groq and Cerebras deliberately keep the 15s
+// default: both run custom inference silicon and logged zero aborts in
+// production (161 and 30 failures respectively, none of them timeouts).
 register(new OpenAICompatProvider({
     platform: 'groq',
     name: 'Groq',
@@ -25,6 +27,8 @@ register(new OpenAICompatProvider({
     platform: 'sambanova',
     name: 'SambaNova',
     baseUrl: 'https://api.sambanova.ai/v1',
+    // 31 aborts logged; 6 of its 7 enabled rows are Frontier/Large.
+    timeoutMs: 60000,
 }));
 // NVIDIA NIM - OpenAI-compatible. The catalog is almost entirely large models
 // (70B Llamas, 120B/550B Nemotrons, DeepSeek/Kimi/MiniMax frontier tiers) and
@@ -44,6 +48,8 @@ register(new OpenAICompatProvider({
     platform: 'mistral',
     name: 'Mistral',
     baseUrl: 'https://api.mistral.ai/v1',
+    // 11 aborts logged on the large models.
+    timeoutMs: 60000,
 }));
 // OpenRouter - OpenAI-compatible with extra headers
 register(new OpenAICompatProvider({
@@ -54,6 +60,10 @@ register(new OpenAICompatProvider({
         'HTTP-Referer': 'http://localhost:3001',
         'X-Title': 'LLM-Hub',
     },
+    // Largest catalog (25 enabled) and an aggregator that queues free-tier
+    // traffic behind paid, so slow responses are routine. Matches the bump
+    // BazaarLink already had for the same reason.
+    timeoutMs: 60000,
 }));
 // GitHub Models — OpenAI-compatible. Catalog uses `<publisher>/<model>` ids
 // (e.g. `openai/gpt-4.1`); the old Azure endpoint rejects that prefix with
@@ -114,6 +124,8 @@ register(new OpenAICompatProvider({
     platform: 'zhipu',
     name: 'Zhipu AI',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    // 7 aborts logged; GLM frontier models are slow to first token.
+    timeoutMs: 60000,
 }));
 // Ollama Cloud — OpenAI-compatible. Free plan: 1 concurrent model, 5h session
 // caps, GPU-time-based quota (not per-token). Many catalog models on the
@@ -139,6 +151,8 @@ register(new OpenAICompatProvider({
     platform: 'kilo',
     name: 'Kilo Gateway',
     baseUrl: 'https://api.kilo.ai/api/gateway/v1',
+    // Aggregator fronting a 120B free route.
+    timeoutMs: 60000,
 }));
 // Pollinations — OpenAI-compatible, anonymous tier. The chat completions
 // endpoint lives at `/openai/v1/chat/completions` (NOT `/v1/...` — the
@@ -148,6 +162,9 @@ register(new OpenAICompatProvider({
     platform: 'pollinations',
     name: 'Pollinations',
     baseUrl: 'https://text.pollinations.ai/openai/v1',
+    // Measured 2026-08-23: 29.9s to respond across three trials on the
+    // anonymous tier, so every request aborted at the 15s default.
+    timeoutMs: 60000,
 }));
 // LLM7.io — OpenAI-compatible aggregator. 100 req/hr free; anonymous access
 // also works for basic models. Wraps a handful of upstream models behind one
@@ -157,6 +174,8 @@ register(new OpenAICompatProvider({
     platform: 'llm7',
     name: 'LLM7',
     baseUrl: 'https://api.llm7.io/v1',
+    // 4 aborts logged; aggregator with a 400k-context frontier row.
+    timeoutMs: 60000,
 }));
 // BazaarLink — OpenAI-compatible aggregator (keys start with sk-bl-). Bare
 // model ids are canonical (`glm-5.1`); `provider/model` aliases also work.
