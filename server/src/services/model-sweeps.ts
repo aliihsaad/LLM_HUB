@@ -10,7 +10,7 @@ import { decrypt } from '../lib/crypto.js';
 import { isFreeOnlyMode } from '../lib/app-settings.js';
 import { PROVIDER_METADATA } from '../lib/provider-metadata.js';
 import { getProvider } from '../providers/index.js';
-import { recordRequest, recordTokens, setCooldown } from './ratelimit.js';
+import { recordRequest, recordTokens, setCooldown, setKeyCooldown } from './ratelimit.js';
 import {
   recordModelFailure,
   recordRateLimitHit,
@@ -233,7 +233,10 @@ async function testTarget(target: SweepTarget): Promise<ModelSweepResult> {
 
       logSweepRequest(target.platform, target.modelId, 'error', 4, 0, latency, message);
       if (failure.category === 'rate_limit') recordRateLimitHit(target.modelDbId);
-      if (failure.keyCooldownMs > 0) setCooldown(target.platform, target.modelId, key.id, failure.keyCooldownMs);
+      if (failure.keyCooldownMs > 0) {
+        if (failure.cooldownScope === 'key') setKeyCooldown(target.platform, key.id, failure.keyCooldownMs);
+        else setCooldown(target.platform, target.modelId, key.id, failure.keyCooldownMs);
+      }
       if (failure.skipModel) break;
     }
   }

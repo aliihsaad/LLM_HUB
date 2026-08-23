@@ -1067,6 +1067,21 @@ export class GoogleProvider extends BaseProvider {
     }
   }
 
+  /**
+   * Liveness only — this proves the key authenticates, NOT that its project may
+   * run inference.
+   *
+   * Verified 2026-08-23 across 16 live keys: a project answering
+   * "403: Your project has been denied access" on generateContent still returns
+   * 200 from both `GET /models` and `countTokens`, so neither free endpoint can
+   * detect the denial. Only generateContent can, and health.ts sweeps every 5
+   * minutes — probing it here would burn ~4,600 free-tier requests a day just
+   * to check keys.
+   *
+   * The denial is caught where it actually surfaces instead: classifyProviderError
+   * maps it to an auth failure with a key-scoped 24h cooldown, so one 403 benches
+   * that credential across every model rather than once per model.
+   */
   async validateKey(apiKey: string): Promise<boolean> {
     // Transport errors propagate — health.ts marks status='error' without
     // counting toward auto-disable. Only confirmed 401/403 disables a key.

@@ -73,16 +73,38 @@ export function setCooldown(platform, modelId, keyId, durationMs = 60_000) {
     const key = `${platform}:${modelId}:${keyId}:cooldown`;
     cooldowns.set(key, Date.now() + durationMs);
 }
-export function isOnCooldown(platform, modelId, keyId) {
-    const key = `${platform}:${modelId}:${keyId}:cooldown`;
-    const expiry = cooldowns.get(key);
+/** Cooldown key covering every model on a platform for one credential. */
+function keyScopedCooldownId(platform, keyId) {
+    return `${platform}:*:${keyId}:cooldown`;
+}
+/**
+ * Bench a credential across ALL models on its platform.
+ *
+ * Some failures are properties of the account, not the model: a Google project
+ * denied access answers 403 for every model it owns. A per-model cooldown
+ * cannot express that, so the router kept re-selecting the bad credential once
+ * per model — one denied Google project produced 50 logged 403s across the
+ * catalog while its dashboard row still read "healthy".
+ */
+export function setKeyCooldown(platform, keyId, durationMs = 60_000) {
+    cooldowns.set(keyScopedCooldownId(platform, keyId), Date.now() + durationMs);
+}
+function isExpired(id) {
+    const expiry = cooldowns.get(id);
     if (!expiry)
-        return false;
+        return true;
     if (Date.now() > expiry) {
-        cooldowns.delete(key);
-        return false;
+        cooldowns.delete(id);
+        return true;
     }
-    return true;
+    return false;
+}
+export function isOnCooldown(platform, modelId, keyId) {
+    // A key-scoped cooldown outranks the per-model one: if the credential itself
+    // is benched, no model on that platform can use it.
+    if (!isExpired(keyScopedCooldownId(platform, keyId)))
+        return true;
+    return !isExpired(`${platform}:${modelId}:${keyId}:cooldown`);
 }
 export function getRateLimitStatus(platform, modelId, keyId, limits) {
     const now = Date.now();

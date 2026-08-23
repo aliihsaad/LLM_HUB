@@ -5,6 +5,13 @@ export interface ClassifiedProviderError {
   retryable: boolean;
   skipModel: boolean;
   keyCooldownMs: number;
+  /**
+   * How wide the cooldown should be. 'model' benches the credential for the
+   * one model that failed; 'key' benches it for every model on the platform,
+   * which is the only correct scope when the failure is a property of the
+   * account rather than the model.
+   */
+  cooldownScope?: 'model' | 'key';
 }
 
 export function classifyProviderError(err: unknown): ClassifiedProviderError {
@@ -18,11 +25,27 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
     return { category: 'zero_quota', retryable: true, skipModel: true, keyCooldownMs: 0 };
   }
 
+  // Account-level denials. These describe the credential's project or org, so
+  // they repeat on every model it owns — a per-model cooldown would let the
+  // router pick the same dead credential again for the next model. Matched
+  // before the generic 403 branch, which would otherwise read them as
+  // model_unavailable. Live example logged 50 times on the VPS:
+  // "Google API error 403: Your project has been denied access."
   if (
     msg.includes('organization has been restricted')
     || msg.includes('organization is restricted')
+    || msg.includes('project has been denied access')
+    || msg.includes('has been denied access')
+    || msg.includes('account has been suspended')
+    || msg.includes('account is suspended')
   ) {
-    return { category: 'auth', retryable: true, skipModel: false, keyCooldownMs: 24 * 60 * 60 * 1000 };
+    return {
+      category: 'auth',
+      retryable: true,
+      skipModel: false,
+      keyCooldownMs: 24 * 60 * 60 * 1000,
+      cooldownScope: 'key',
+    };
   }
 
   if (
