@@ -546,3 +546,66 @@ describe('OpenAICompatProvider - platform instances', () => {
     });
   }
 });
+
+describe('provider error body extraction', () => {
+  function mockErrorResponse(status: number, statusText: string, body: unknown) {
+    vi.spyOn(global, 'fetch').mockImplementation(async () => ({
+      ok: false,
+      status,
+      statusText,
+      json: () => Promise.resolve(body),
+    } as any));
+  }
+
+  const nvidia = () => new OpenAICompatProvider({
+    platform: 'nvidia',
+    name: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+  });
+
+  const call = (p: OpenAICompatProvider) =>
+    p.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model');
+
+  // NVIDIA NIM answers RFC 7807 problem+json with no `error` envelope. Reading
+  // only `error.message` fell through to statusText, turning a fully explained
+  // retirement into "NVIDIA NIM API error 410: Gone".
+  it('surfaces the RFC 7807 detail field NVIDIA returns', async () => {
+    mockErrorResponse(410, 'Gone', {
+      type: 'about:blank',
+      title: 'Gone',
+      status: 410,
+      detail: "The model 'minimaxai/minimax-m2.7' has reached its end of life on 2026-07-27T00:00:00Z and is no longer available.",
+    });
+
+    await expect(call(nvidia())).rejects.toThrow(/reached its end of life on 2026-07-27/);
+  });
+
+  it('keeps the status code prefix alongside the problem+json detail', async () => {
+    mockErrorResponse(403, 'Forbidden', {
+      status: 403, title: 'Forbidden', detail: 'Authorization failed',
+    });
+
+    await expect(call(nvidia())).rejects.toThrow('NVIDIA NIM API error 403: Forbidden: Authorization failed');
+  });
+
+  it('still prefers the OpenAI error.message shape when present', async () => {
+    mockErrorResponse(429, 'Too Many Requests', {
+      error: { message: 'Rate limit reached for model', type: 'rate_limit_error' },
+    });
+
+    await expect(call(nvidia())).rejects.toThrow('NVIDIA NIM API error 429: Rate limit reached for model');
+  });
+
+  it('falls back to title, then statusText, when no detail is given', async () => {
+    mockErrorResponse(404, 'Not Found', { status: 404, title: 'Not Found' });
+    await expect(call(nvidia())).rejects.toThrow('NVIDIA NIM API error 404: Not Found');
+
+    mockErrorResponse(502, 'Bad Gateway', {});
+    await expect(call(nvidia())).rejects.toThrow('NVIDIA NIM API error 502: Bad Gateway');
+  });
+
+  it('reads a bare message field from aggregators that skip the envelope', async () => {
+    mockErrorResponse(400, 'Bad Request', { message: 'model is required' });
+    await expect(call(nvidia())).rejects.toThrow('NVIDIA NIM API error 400: model is required');
+  });
+});
