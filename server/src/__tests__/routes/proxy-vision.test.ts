@@ -125,7 +125,7 @@ describe('Vision chat proxy route', () => {
             id: 'or-vision-test',
             object: 'chat.completion',
             created: 1,
-            model: 'nex-agi/nex-n2-pro:free',
+            model: 'nvidia/nemotron-nano-12b-v2-vl:free',
             choices: [{
               index: 0,
               message: { role: 'assistant', content: 'The image was accepted by OpenRouter.' },
@@ -139,13 +139,13 @@ describe('Vision chat proxy route', () => {
     });
 
     const { status, body, headers } = await request(app, 'POST', '/v1/chat/completions', {
-      model: 'nex-agi/nex-n2-pro:free',
+      model: 'nvidia/nemotron-nano-12b-v2-vl:free',
       messages,
     });
 
     expect(status).toBe(200);
-    expect(headers.get('X-Routed-Via')).toBe('openrouter/nex-agi/nex-n2-pro:free');
-    expect(providerBody.model).toBe('nex-agi/nex-n2-pro:free');
+    expect(headers.get('X-Routed-Via')).toBe('openrouter/nvidia/nemotron-nano-12b-v2-vl:free');
+    expect(providerBody.model).toBe('nvidia/nemotron-nano-12b-v2-vl:free');
     expect(providerBody.messages).toEqual(messages);
     expect(body.choices[0].message.content).toContain('OpenRouter');
   });
