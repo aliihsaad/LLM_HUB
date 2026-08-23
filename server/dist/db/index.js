@@ -49,6 +49,7 @@ export async function initDb(dbPath) {
     migrateModelsV18(db);
     migrateModelsV19(db);
     migrateModelsV20(db);
+    migrateModelsV21(db);
     seedModelCapabilities(db);
     // Must follow seedModelCapabilities — that is where the image rows are seeded.
     flagPaidGoogleModels(db);
@@ -1508,6 +1509,72 @@ function migrateModelsV19(db) {
  */
 function migrateModelsV20(db) {
     db.prepare("UPDATE models SET context_window = 32768 WHERE platform = 'sambanova' AND model_id = 'DeepSeek-V3.2'").run();
+}
+/**
+ * V21 (August 2026): retire the NVIDIA NIM rows the upstream end-of-lifed and
+ * add the models that replaced them.
+ *
+ * Live-probed 2026-08-23 against integrate.api.nvidia.com. NVIDIA resolves the
+ * model name before authenticating, so an unauthenticated POST to
+ * /v1/chat/completions distinguishes the cases exactly: 401/403 = the route
+ * exists, 404 = never existed, 410 = retired. Four of the ten V11 rows answer
+ * 410 and are absent from GET /v1/models, e.g.:
+ *
+ *   "The model 'minimaxai/minimax-m2.7' has reached its end of life on
+ *    2026-07-27T00:00:00Z and is no longer available."
+ *
+ * Disabled rather than deleted, per V18/V19 precedent. The six survivors
+ * (llama-3.1-70b, llama-3.3-70b, nemotron-3-super-120b, nemotron-3-nano-30b,
+ * gemma-4-31b, kimi-k2.6) all still answer 401 and stay enabled.
+ *
+ * Replacements are the current NVIDIA-hosted equivalents, each probe-confirmed
+ * 401. Context windows follow the V11 convention of a conservative
+ * family-consistent estimate — NVIDIA does not publish them on /v1/models.
+ */
+function migrateModelsV21(db) {
+    const retired = [
+        'meta/llama-4-maverick-17b-128e-instruct', // no Llama 4 remains on NIM
+        'deepseek-ai/deepseek-v4-pro',
+        'mistralai/mistral-large-3-675b-instruct-2512',
+        'minimaxai/minimax-m2.7', // EOL 2026-07-27
+    ];
+    const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+    const additions = [
+        // Direct successors to the four retired rows.
+        ['nvidia', 'deepseek-ai/deepseek-v4-flash-0731', 'DeepSeek V4 Flash (NV)', 3, 9, 'Frontier', 40, null, null, null, '~2M (credits)', 131072],
+        ['nvidia', 'minimaxai/minimax-m3', 'MiniMax M3 (NV)', 3, 9, 'Frontier', 40, null, null, null, '~2M (credits)', 196608],
+        ['nvidia', 'mistralai/mistral-nemotron', 'Mistral Nemotron (NV)', 8, 8, 'Large', 40, null, null, null, '~3M (credits)', 131072],
+        ['nvidia', 'meta/muse-glimmer-30b', 'Muse Glimmer 30B (NV)', 11, 8, 'Large', 40, null, null, null, '~3M (credits)', 131072],
+        // New frontier/fast tiers NVIDIA added since V11.
+        ['nvidia', 'nvidia/nemotron-3-ultra-550b-a55b', 'Nemotron 3 Ultra 550B (NV)', 2, 9, 'Frontier', 40, null, null, null, '~2M (credits)', 262144],
+        ['nvidia', 'moonshotai/kimi-k3', 'Kimi K3 (NV)', 3, 9, 'Frontier', 40, null, null, null, '~2M (credits)', 131072],
+        ['nvidia', 'nvidia/nemotron-3.5-lightning-30b-a3b', 'Nemotron 3.5 Lightning 30B (NV)', 20, 6, 'Medium', 40, null, null, null, '~3M (credits)', 262144],
+        ['nvidia', 'openai/gpt-oss-120b', 'GPT-OSS 120B (NV)', 6, 8, 'Large', 40, null, null, null, '~3M (credits)', 131072],
+    ];
+    const disable = db.prepare("UPDATE models SET enabled = 0 WHERE platform = 'nvidia' AND model_id = ?");
+    const apply = db.transaction(() => {
+        for (const modelId of retired)
+            disable.run(modelId);
+        for (const a of additions)
+            insert.run(...a);
+        // Same backfill V11 uses: every catalog row needs a fallback_config entry
+        // or the router cannot reach it.
+        const missing = db.prepare(`
+      SELECT m.id FROM models m
+      LEFT JOIN fallback_config f ON m.id = f.model_db_id
+      WHERE f.id IS NULL ORDER BY m.intelligence_rank ASC
+    `).all();
+        if (missing.length > 0) {
+            const maxPriority = db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get().mx;
+            const addFb = db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)');
+            for (let i = 0; i < missing.length; i++)
+                addFb.run(missing[i].id, maxPriority + i + 1);
+        }
+    });
+    apply();
 }
 /**
  * Mark Google models that have no free tier (verified 2026-07-22 against
