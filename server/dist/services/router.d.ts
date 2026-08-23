@@ -52,8 +52,17 @@ export declare function getAllPenalties(): Array<{
  * @param skipKeys - set of "platform:modelId:keyId" to skip (failed on this request)
  * @param preferredModelDbId - try this model first (sticky session)
  */
-export declare function routeRequest(estimatedTokens?: number, skipKeys?: Set<string>, preferredModelDbId?: number, skipModelDbIds?: Set<number>, category?: string, platformFilter?: string): RouteResult;
-export declare function routeRequestInternal(estimatedTokens?: number, skipKeys?: Set<string>, preferredModelDbId?: number, skipModelDbIds?: Set<number>, category?: string, platformFilter?: string): RouteResult;
+export declare function routeRequest(estimatedTokens?: number, skipKeys?: Set<string>, preferredModelDbId?: number, skipModelDbIds?: Set<number>, category?: string, platformFilter?: string, pinnedModelDbId?: number): RouteResult;
+export declare function routeRequestInternal(estimatedTokens?: number, skipKeys?: Set<string>, preferredModelDbId?: number, skipModelDbIds?: Set<number>, category?: string, platformFilter?: string, 
+/**
+ * Model the caller named explicitly in the request body. `fallback_config`
+ * controls participation in AUTOMATIC fallback, so it must not veto a
+ * deliberate pin — otherwise naming a model that is merely switched off in
+ * the Fallback Chain silently serves a different one. Distinct from
+ * `preferredModelDbId`, which also carries the implicit sticky-session
+ * choice and does stay subject to the toggle.
+ */
+pinnedModelDbId?: number): RouteResult;
 /**
  * Route a request for a specific model capability such as embeddings.
  * Capability routes are intentionally independent from the chat fallback
