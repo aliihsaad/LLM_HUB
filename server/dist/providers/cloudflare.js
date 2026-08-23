@@ -1,4 +1,4 @@
-import { BaseProvider } from './base.js';
+import { BaseProvider, readProviderErrorText } from './base.js';
 /**
  * Cloudflare Workers AI provider.
  * API key format expected: "account_id:api_token"
@@ -7,6 +7,9 @@ import { BaseProvider } from './base.js';
 export class CloudflareProvider extends BaseProvider {
     platform = 'cloudflare';
     name = 'Cloudflare Workers AI';
+    // 7 of its 9 enabled catalog rows are Frontier/Large models on shared
+    // Workers AI capacity, where cold starts are common.
+    defaultTimeoutMs = 60000;
     parseKey(apiKey) {
         const sep = apiKey.indexOf(':');
         if (sep === -1)
@@ -40,7 +43,7 @@ export class CloudflareProvider extends BaseProvider {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Cloudflare API error ${res.status}: ${err.error?.message ?? err.errors?.[0]?.message ?? res.statusText}`);
+            throw new Error(`Cloudflare API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const data = await res.json();
         data._routed_via = { platform: 'cloudflare', model: modelId };
@@ -69,7 +72,7 @@ export class CloudflareProvider extends BaseProvider {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Cloudflare API error ${res.status}: ${err.error?.message ?? err.errors?.[0]?.message ?? res.statusText}`);
+            throw new Error(`Cloudflare API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const reader = res.body?.getReader();
         if (!reader)

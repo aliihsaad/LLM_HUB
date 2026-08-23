@@ -1,4 +1,4 @@
-import { BaseProvider } from './base.js';
+import { BaseProvider, readProviderErrorText } from './base.js';
 /**
  * Generic provider for platforms that use an OpenAI-compatible API.
  * Covers: Groq, Cerebras, SambaNova, NVIDIA NIM, Mistral, OpenRouter,
@@ -287,40 +287,34 @@ export class OpenAICompatProvider extends BaseProvider {
     }
 }
 /**
- * Extract the most useful human-readable text from a failed response body.
+ * Pull the most specific text out of a nested `error` object on a 2xx body.
  *
- * Most OpenAI-compatible providers answer `{ error: { message } }`, but NVIDIA
- * NIM returns RFC 7807 problem+json — `{ type, title, status, detail }` — with
- * no `error` key at all. Reading only `error.message` therefore fell through to
- * `res.statusText`, so a retirement that upstream explains in full ("The model
- * 'minimaxai/minimax-m2.7' has reached its end of life on 2026-07-27...")
- * surfaced in the dashboard as the useless "NVIDIA NIM API error 410: Gone".
- *
- * Checked in order of specificity; `detail`/`title` cover problem+json, bare
- * `message`/`detail` cover the aggregators that skip the `error` envelope.
+ * OpenRouter reports upstream failures as HTTP 200 with `{error:{code,...}}`
+ * and frequently omits `message`, putting the real reason in
+ * `metadata.raw` (and the upstream's name in `metadata.provider_name`).
+ * Defaulting straight to 'Provider returned error' discarded that: 531 of the
+ * VPS's 682 OpenRouter failures logged as the useless "OpenRouter API error
+ * 429: Provider returned error".
  */
-function readProviderErrorText(body, statusText) {
-    if (!body || typeof body !== 'object')
-        return statusText;
-    const b = body;
-    const error = b.error;
-    if (typeof error === 'string' && error.trim())
-        return error;
-    if (error && typeof error === 'object') {
-        const message = error.message;
-        if (typeof message === 'string' && message.trim())
-            return message;
+function readNestedErrorMessage(body) {
+    if (typeof body.message === 'string' && body.message.trim())
+        return body.message;
+    const metadata = body.metadata;
+    if (metadata && typeof metadata === 'object') {
+        const meta = metadata;
+        const raw = meta.raw;
+        const provider = typeof meta.provider_name === 'string' ? meta.provider_name : undefined;
+        let detail;
+        if (typeof raw === 'string' && raw.trim())
+            detail = raw;
+        else if (raw && typeof raw === 'object')
+            detail = readProviderErrorText(raw, '');
+        if (detail)
+            return provider ? `${provider}: ${detail}` : detail;
+        if (provider)
+            return `upstream ${provider} returned an error`;
     }
-    // RFC 7807: prefer `detail` (the explanation), fall back to `title` (the
-    // status phrase). Both present → "Gone: The model ... end of life ...".
-    const detail = typeof b.detail === 'string' && b.detail.trim() ? b.detail : undefined;
-    const title = typeof b.title === 'string' && b.title.trim() ? b.title : undefined;
-    if (detail)
-        return title && title !== detail ? `${title}: ${detail}` : detail;
-    const message = typeof b.message === 'string' && b.message.trim() ? b.message : undefined;
-    if (message)
-        return message;
-    return title ?? statusText;
+    return 'Provider returned error';
 }
 function throwIfOpenAIErrorBody(providerName, data) {
     if (!data || typeof data !== 'object' || !('error' in data))
@@ -333,9 +327,8 @@ function throwIfOpenAIErrorBody(providerName, data) {
     }
     if (typeof error === 'object') {
         const body = error;
-        const message = typeof body.message === 'string' ? body.message : 'Provider returned error';
         const code = typeof body.code === 'number' || typeof body.code === 'string' ? ` ${body.code}` : '';
-        throw new Error(`${providerName} API error${code}: ${message}`);
+        throw new Error(`${providerName} API error${code}: ${readNestedErrorMessage(body)}`);
     }
     throw new Error(`${providerName} API error: Provider returned error`);
 }

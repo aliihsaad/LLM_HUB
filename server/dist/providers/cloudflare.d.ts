@@ -8,6 +8,7 @@ import { BaseProvider, type CompletionOptions } from './base.js';
 export declare class CloudflareProvider extends BaseProvider {
     readonly platform: "cloudflare";
     readonly name = "Cloudflare Workers AI";
+    protected defaultTimeoutMs: number;
     private parseKey;
     private normalizeMessages;
     chatCompletion(apiKey: string, messages: ChatMessage[], modelId: string, options?: CompletionOptions): Promise<ChatCompletionResponse>;

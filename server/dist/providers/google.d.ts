@@ -3,6 +3,7 @@ import { BaseProvider, type CompletionOptions } from './base.js';
 export declare class GoogleProvider extends BaseProvider {
     readonly platform: "google";
     readonly name = "Google AI Studio";
+    protected defaultTimeoutMs: number;
     chatCompletion(apiKey: string, messages: ChatMessage[], modelId: string, options?: CompletionOptions): Promise<ChatCompletionResponse>;
     createImage(apiKey: string, request: ImageGenerationRequest, modelId: string): Promise<ImagesResponse>;
     editImage(apiKey: string, request: ImageEditRequest, modelId: string): Promise<ImagesResponse>;

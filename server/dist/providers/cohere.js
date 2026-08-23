@@ -1,8 +1,10 @@
-import { BaseProvider } from './base.js';
+import { BaseProvider, readProviderErrorText } from './base.js';
 const API_BASE = 'https://api.cohere.ai/compatibility/v1';
 export class CohereProvider extends BaseProvider {
     platform = 'cohere';
     name = 'Cohere';
+    // Both enabled rows are Large command models on the free trial tier.
+    defaultTimeoutMs = 60000;
     async chatCompletion(apiKey, messages, modelId, options) {
         const body = {
             model: modelId,
@@ -23,7 +25,7 @@ export class CohereProvider extends BaseProvider {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Cohere API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Cohere API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const data = await res.json();
         data._routed_via = { platform: 'cohere', model: modelId };
@@ -50,7 +52,7 @@ export class CohereProvider extends BaseProvider {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(`Cohere API error ${res.status}: ${err.error?.message ?? res.statusText}`);
+            throw new Error(`Cohere API error ${res.status}: ${readProviderErrorText(err, res.statusText)}`);
         }
         const reader = res.body?.getReader();
         if (!reader)
