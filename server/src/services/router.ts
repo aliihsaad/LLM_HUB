@@ -290,6 +290,7 @@ export function routeRequest(
   skipModelDbIds?: Set<number>,
   category?: string,
   platformFilter?: string,
+  pinnedModelDbId?: number,
 ): RouteResult {
   return routeRequestInternal(
     estimatedTokens,
@@ -298,6 +299,7 @@ export function routeRequest(
     skipModelDbIds,
     category,
     platformFilter,
+    pinnedModelDbId,
   );
 }
 
@@ -308,6 +310,15 @@ export function routeRequestInternal(
   skipModelDbIds?: Set<number>,
   category?: string,
   platformFilter?: string,
+  /**
+   * Model the caller named explicitly in the request body. `fallback_config`
+   * controls participation in AUTOMATIC fallback, so it must not veto a
+   * deliberate pin — otherwise naming a model that is merely switched off in
+   * the Fallback Chain silently serves a different one. Distinct from
+   * `preferredModelDbId`, which also carries the implicit sticky-session
+   * choice and does stay subject to the toggle.
+   */
+  pinnedModelDbId?: number,
 ): RouteResult {
   const db = getDb();
   const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
@@ -369,7 +380,7 @@ export function routeRequestInternal(
   }
 
   for (const entry of sortedChain) {
-    if (!entry.enabled) continue;
+    if (!entry.enabled && entry.model_db_id !== pinnedModelDbId) continue;
     if (skipModelDbIds?.has(entry.model_db_id)) continue;
     if (isModelRuntimeBlocked(db, entry.model_db_id)) continue;
 
