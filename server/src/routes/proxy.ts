@@ -24,7 +24,7 @@ import {
   recordSuccess,
   type RouteResult,
 } from '../services/router.js';
-import { recordRequest, recordTokens, setCooldown } from '../services/ratelimit.js';
+import { recordRequest, recordTokens, setCooldown, setKeyCooldown } from '../services/ratelimit.js';
 import {
   canRetryProviderFailure,
   classifyProviderError,
@@ -798,7 +798,11 @@ function prepareProviderRetry(
   const skipId = `${route.platform}:${route.modelId}:${route.keyId}`;
   skipKeys.add(skipId);
   if (failure.keyCooldownMs > 0) {
-    setCooldown(route.platform, route.modelId, route.keyId, failure.keyCooldownMs);
+    if (failure.cooldownScope === 'key') {
+      setKeyCooldown(route.platform, route.keyId, failure.keyCooldownMs);
+    } else {
+      setCooldown(route.platform, route.modelId, route.keyId, failure.keyCooldownMs);
+    }
   }
   if (failure.skipModel) {
     skipModels.add(route.modelDbId);
