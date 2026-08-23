@@ -50,8 +50,10 @@ export async function initDb(dbPath) {
     migrateModelsV19(db);
     migrateModelsV20(db);
     migrateModelsV21(db);
+    migrateModelsV22(db);
     seedModelCapabilities(db);
     // Must follow seedModelCapabilities — that is where the image rows are seeded.
+    retireDeadCatalogRowsV22(db);
     flagPaidGoogleModels(db);
     purgeLegacyBazaarlinkDiscoveries(db);
     ensureUnifiedKey(db);
@@ -1573,6 +1575,151 @@ function migrateModelsV21(db) {
             for (let i = 0; i < missing.length; i++)
                 addFb.run(missing[i].id, maxPriority + i + 1);
         }
+    });
+    apply();
+}
+/**
+ * V22 (August 2026): retire two dead providers and the aggregator rows whose
+ * free tiers ended.
+ *
+ * All verified 2026-08-23 against live endpoints and the VPS request log
+ * (4618 requests, 2205 errors).
+ *
+ * HUGGING FACE — 559 of its 563 logged failures are `402: Payment Required`.
+ * The free Inference Providers credit is exhausted, so every request fails
+ * before reaching a model. Disabled at the catalog level; the provider stays
+ * registered so topping up the account is enough to re-enable.
+ *
+ * GITHUB MODELS — the whole service is being retired. Both the inference and
+ * catalog endpoints answer:
+ *   {"error":{"code":"github_models_retirement_brownout","message":"GitHub
+ *    Models is temporarily unavailable as part of a scheduled retirement
+ *    brownout."}}
+ *
+ * OPENROUTER — the models still exist, but their `:free` variants were
+ * discontinued. Production logs the reason verbatim: "404: This model is
+ * unavailable for free. The paid version is available now - use this slug".
+ * Only 18 `:free` routes remain. Retiring the 15 dead rows matters more than
+ * usual here: the bare (paid) slug still resolves, so a stale row is a
+ * billing risk rather than a clean failure.
+ *
+ * LLM7 — three rows are ID drift rather than true retirement (`gpt-oss-20b`
+ * → `gpt-oss:20b`, `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` →
+ * `meta-Llama-3.1-8B-Instruct-Turbo`), one is gone (`ministral-8b-2512`), and
+ * `GLM-4.6V-Flash` was superseded by `glm-5.3` — which is NOT added here
+ * because it answers 401 anonymously, so its free-tier status is unconfirmed.
+ *
+ * Additions carry context windows reported by each upstream's own model list,
+ * not estimates. `nvidia/nemotron-3.5-content-safety:free` is deliberately
+ * excluded: it is a moderation classifier, not a chat model, and would return
+ * safety verdicts if the router ever picked it for chat.
+ */
+/*
+ * SPLIT ACROSS seedModelCapabilities. That function does not only seed
+ * capabilities — it also inserts the embedding / image / vision catalog rows,
+ * and it runs after every migrateModelsV* call (see the flagPaidGoogleModels
+ * note below for the same constraint). So:
+ *
+ *   - additions run BEFORE it, so new chat rows get capability rows seeded
+ *     and become routable;
+ *   - retirements run AFTER it, because six of the rows being retired
+ *     (the OpenRouter embedding/image entries and nex-n2-pro) do not exist
+ *     yet at migration time on a fresh database. Disabling them earlier was
+ *     silently a no-op on first boot and only took effect on the second,
+ *     which broke migration idempotency.
+ */
+function migrateModelsV22(db) {
+    const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+    const additions = [
+        // OpenRouter — the `:free` routes still live upstream. Limits match the
+        // existing OpenRouter rows (20 RPM / 200 RPD free pool).
+        ['openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'Nemotron 3 Ultra 550B (free)', 2, 9, 'Frontier', 20, 200, null, null, '~6M', 1000000],
+        ['openrouter', 'z-ai/glm-5.2:free', 'GLM-5.2 (free)', 3, 9, 'Frontier', 20, 200, null, null, '~6M', 256000],
+        ['openrouter', 'thinkingmachines/inkling:free', 'Inkling (free)', 5, 9, 'Frontier', 20, 200, null, null, '~6M', 262144],
+        ['openrouter', 'poolside/laguna-s-2.1:free', 'Laguna S 2.1 (free)', 10, 8, 'Large', 20, 200, null, null, '~6M', 262144],
+        ['openrouter', 'poolside/laguna-xs-2.1:free', 'Laguna XS 2.1 (free)', 12, 9, 'Large', 20, 200, null, null, '~6M', 262144],
+        ['openrouter', 'nvidia/nemotron-3.5-lightning:free', 'Nemotron 3.5 Lightning (free)', 20, 4, 'Medium', 20, 200, null, null, '~6M', 1000000],
+        ['openrouter', 'thinkingmachines/inkling-small:free', 'Inkling Small (free)', 20, 9, 'Medium', 20, 200, null, null, '~6M', 262144],
+        ['openrouter', 'cohere/north-mini-code:free', 'North Mini Code (free)', 22, 9, 'Medium', 20, 200, null, null, '~6M', 256000],
+        ['openrouter', 'dots-studio/dots-3-note-preview:free', 'Dots 3 Note Preview (free)', 24, 9, 'Medium', 20, 200, null, null, '~6M', 512000],
+        ['openrouter', 'liquid/lfm-2.5-2.6b:free', 'LFM 2.5 2.6B (free)', 30, 10, 'Small', 20, 200, null, null, '~6M', 65536],
+        // LLM7 — probe-confirmed 200 anonymously on 2026-08-23. Limits match the
+        // existing LLM7 rows (100 req/hr free).
+        ['llm7', 'DeepSeek-V4-Flash-0731', 'DeepSeek V4 Flash (LLM7)', 4, 9, 'Frontier', 100, null, null, null, '~2-3M (100/hr)', 400000],
+        ['llm7', 'gpt-oss:20b', 'GPT-OSS 20B (LLM7)', 18, 10, 'Medium', 100, null, null, null, '~2-3M (100/hr)', 128000],
+        ['llm7', 'meta-Llama-3.1-8B-Instruct-Turbo', 'Llama 3.1 8B Turbo (LLM7)', 28, 10, 'Small', 100, null, null, null, '~2-3M (100/hr)', 128000],
+    ];
+    const apply = db.transaction(() => {
+        for (const a of additions)
+            insert.run(...a);
+        // Same backfill V11/V21 use: a catalog row without a fallback_config entry
+        // is unreachable by the router.
+        const missing = db.prepare(`
+      SELECT m.id FROM models m
+      LEFT JOIN fallback_config f ON m.id = f.model_db_id
+      WHERE f.id IS NULL ORDER BY m.intelligence_rank ASC
+    `).all();
+        if (missing.length > 0) {
+            const maxPriority = db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get().mx;
+            const addFb = db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)');
+            for (let i = 0; i < missing.length; i++)
+                addFb.run(missing[i].id, maxPriority + i + 1);
+        }
+    });
+    apply();
+}
+/**
+ * V22 retirements. Runs after seedModelCapabilities — see the note on
+ * migrateModelsV22 for why. Idempotent.
+ */
+function retireDeadCatalogRowsV22(db) {
+    const disableProviders = ['huggingface', 'github'];
+    // Verified per-model via /api/v1/models/{id}/endpoints, NOT the bulk
+    // /api/v1/models list. The bulk list only returns chat models, so embedding
+    // and image rows look absent from it and would be retired by mistake — the
+    // endpoints route is the authoritative check. A record with zero serving
+    // endpoints is dead; `meta-llama/llama-3.3-70b-instruct` reports 13 while
+    // its `:free` twin reports 0, which is exactly the discontinued-free-tier
+    // shape production logs as "This model is unavailable for free".
+    //
+    // Confirmed still live and deliberately NOT retired: text-embedding-3-small
+    // (2 endpoints), text-embedding-3-large (2), flux.2-klein-4b (1),
+    // riverflow-v2.5-fast (1), riverflow-v2.5-pro (1).
+    const retiredOpenRouter = [
+        'inclusionai/ling-2.6-1t:free',
+        'liquid/lfm-2.5-1.2b-instruct:free',
+        'liquid/lfm-2.5-1.2b-thinking:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'minimax/minimax-m2.5:free',
+        'nex-agi/nex-n2-pro:free',
+        'openai/gpt-oss-120b:free',
+        'openai/gpt-oss-20b:free',
+        'poolside/laguna-m.1:free',
+        'poolside/laguna-xs.2:free',
+        'qwen/qwen3-coder:free',
+        'qwen/qwen3-embedding-0.6b',
+        'qwen/qwen3-next-80b-a3b-instruct:free',
+        'tencent/hy3-preview:free',
+        'z-ai/glm-4.5-air:free',
+    ];
+    const retiredLlm7 = [
+        'GLM-4.6V-Flash',
+        'gpt-oss-20b',
+        'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+        'ministral-8b-2512',
+    ];
+    const disableAllFor = db.prepare('UPDATE models SET enabled = 0 WHERE platform = ?');
+    const disableRow = db.prepare('UPDATE models SET enabled = 0 WHERE platform = ? AND model_id = ?');
+    const apply = db.transaction(() => {
+        for (const platform of disableProviders)
+            disableAllFor.run(platform);
+        for (const modelId of retiredOpenRouter)
+            disableRow.run('openrouter', modelId);
+        for (const modelId of retiredLlm7)
+            disableRow.run('llm7', modelId);
     });
     apply();
 }
