@@ -1940,10 +1940,23 @@ function retireDeadCatalogRowsV22(db: Database.Database) {
   const disableAllFor = db.prepare('UPDATE models SET enabled = 0 WHERE platform = ?');
   const disableRow = db.prepare('UPDATE models SET enabled = 0 WHERE platform = ? AND model_id = ?');
 
+  // Applied once, not on every boot. V18/V19/V21 re-run their disables at each
+  // startup, which is harmless for a single dead row, but this migration turns
+  // off two providers wholesale — so re-running it would silently revert an
+  // operator who re-enabled Hugging Face after topping the account up, and
+  // contradict the recovery path documented above. A settings flag makes the
+  // retirement a one-time event and leaves later manual changes alone.
+  const APPLIED_KEY = 'v22_catalog_retirements_applied';
+  const alreadyApplied = db
+    .prepare('SELECT 1 AS ok FROM settings WHERE key = ?')
+    .get(APPLIED_KEY) as { ok: number } | undefined;
+  if (alreadyApplied) return;
+
   const apply = db.transaction(() => {
     for (const platform of disableProviders) disableAllFor.run(platform);
     for (const modelId of retiredOpenRouter) disableRow.run('openrouter', modelId);
     for (const modelId of retiredLlm7) disableRow.run('llm7', modelId);
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(APPLIED_KEY, '1');
   });
   apply();
 }

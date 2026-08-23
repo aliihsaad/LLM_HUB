@@ -1,3 +1,6 @@
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { initDb, getDb } from '../../db/index.js';
 
@@ -13,12 +16,21 @@ const DEAD_PLATFORMS = ['huggingface', 'github'];
 // variants were discontinued. The bare slug still resolves, so leaving these
 // enabled is a billing risk, not just a failure.
 const RETIRED_OPENROUTER = [
+  'inclusionai/ling-2.6-1t:free',
+  'liquid/lfm-2.5-1.2b-instruct:free',
+  'liquid/lfm-2.5-1.2b-thinking:free',
   'meta-llama/llama-3.3-70b-instruct:free',
+  'minimax/minimax-m2.5:free',
+  'nex-agi/nex-n2-pro:free',
   'openai/gpt-oss-120b:free',
   'openai/gpt-oss-20b:free',
+  'poolside/laguna-m.1:free',
+  'poolside/laguna-xs.2:free',
   'qwen/qwen3-coder:free',
+  'qwen/qwen3-embedding-0.6b',
+  'qwen/qwen3-next-80b-a3b-instruct:free',
+  'tencent/hy3-preview:free',
   'z-ai/glm-4.5-air:free',
-  'minimax/minimax-m2.5:free',
 ];
 
 // Absent from api.llm7.io/v1/models; three are ID drift, ministral is gone.
@@ -158,13 +170,58 @@ describe('V22 provider retirement and free-tier drift', () => {
     }
   });
 
-  // A moderation classifier would return safety verdicts, not answers, if the
-  // router ever selected it for chat.
-  it('does not add the content-safety classifier as a chat route', () => {
+  // Two deliberate exclusions. The content-safety model is a moderation
+  // classifier that would return safety verdicts, not answers, if the router
+  // ever picked it for chat. glm-5.3 answers 401 without a key on LLM7, so its
+  // free-tier status is unconfirmed and it must not be seeded as a free route.
+  it('does not add the deliberately excluded models', () => {
     const db = getDb();
-    const row = db
-      .prepare("SELECT id FROM models WHERE model_id = 'nvidia/nemotron-3.5-content-safety:free'")
-      .get() as { id: number } | undefined;
-    expect(row).toBeUndefined();
+    const excluded: Array<[string, string]> = [
+      ['openrouter', 'nvidia/nemotron-3.5-content-safety:free'],
+      ['llm7', 'glm-5.3'],
+    ];
+    for (const [platform, modelId] of excluded) {
+      const row = db
+        .prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?')
+        .get(platform, modelId) as { id: number } | undefined;
+      expect(row, `${platform}/${modelId} must not be in the catalog`).toBeUndefined();
+    }
+  });
+
+  it('records that the retirements ran', () => {
+    const flag = getDb()
+      .prepare("SELECT value FROM settings WHERE key = 'v22_catalog_retirements_applied'")
+      .get() as { value: string } | undefined;
+    expect(flag, 'V22 should record that its retirements ran').toBeDefined();
+  });
+});
+
+// Regression guard for the recovery path the migration documents: the
+// retirement is one-time, so an operator who re-enables Hugging Face after
+// topping the account up keeps that change across restarts. Needs a real file
+// so the second initDb reopens the same database.
+describe('V22 retirement is one-time', () => {
+  it('does not re-disable a provider an operator re-enabled', async () => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    const dbPath = path.join(os.tmpdir(), `llmhub-v22-guard-${Date.now()}.db`);
+
+    const first = await initDb(dbPath);
+    const afterMigration = first
+      .prepare("SELECT COUNT(*) AS c FROM models WHERE platform = 'huggingface' AND enabled = 1")
+      .get() as { c: number };
+    expect(afterMigration.c, 'V22 should disable Hugging Face on first run').toBe(0);
+
+    // Operator tops the account up and re-enables the provider.
+    first.prepare("UPDATE models SET enabled = 1 WHERE platform = 'huggingface'").run();
+    first.close();
+
+    const second = await initDb(dbPath);
+    const afterRestart = second
+      .prepare("SELECT COUNT(*) AS c FROM models WHERE platform = 'huggingface' AND enabled = 1")
+      .get() as { c: number };
+    second.close();
+    fs.rmSync(dbPath, { force: true });
+
+    expect(afterRestart.c, 'a manual re-enable must survive a restart').toBeGreaterThan(0);
   });
 });
