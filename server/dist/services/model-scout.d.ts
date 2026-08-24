@@ -66,6 +66,36 @@ export declare function isBazaarlinkFreeChatEntry(entry: OpenAICompatModelListEn
     context_length?: number | null;
 }): boolean;
 /**
+ * Does this provider error mean "this model no longer exists"?
+ *
+ * Deliberately narrow. It must match removal only — never an auth problem, a
+ * quota problem or an outage — because a match feeds the retirement counter.
+ * Confirmed live 2026-08-23:
+ *   NVIDIA     410 "The model 'minimaxai/minimax-m2.7' has reached its end of life"
+ *   OpenRouter 404 "This model is unavailable for free. The paid version ..."
+ *   LLM7       400 "Model 'gpt-oss-20b' is currently unavailable."
+ *   Cerebras   404 "Model does not exist or you do not have access to it."
+ */
+export declare function isGoneMessage(message: string | undefined): boolean;
+/**
+ * Consecutive "gone" probes before a row is retired. The scout runs every 30
+ * minutes, so 3 means a model must be gone for roughly 90 minutes across three
+ * independent checks — enough to ride out an upstream blip, quick enough that a
+ * dead model leaves the routing chain the same day.
+ */
+export declare const GONE_STREAK_TO_RETIRE = 3;
+/**
+ * Advance or reset a model's gone streak, retiring it once the streak is met.
+ *
+ * Presence reconciliation against a provider's bulk /models list is deliberately
+ * NOT used: OpenRouter's list returns chat models only, so diffing against it
+ * reports embedding and image rows as missing and would disable live models.
+ * Probing each model directly is provider-agnostic and immune to that.
+ *
+ * Returns the model_id when this call retired it, otherwise null.
+ */
+export declare function recordGoneStreak(db: ReturnType<typeof getDb>, modelDbId: number, isGone: boolean): string | null;
+/**
  * Check if a specific model is still available on the free tier.
  *
  * Strategy per platform:
