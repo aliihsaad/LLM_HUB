@@ -185,6 +185,81 @@ async function discoverGoogleModels(apiKey: string, knownSet: Set<string>): Prom
 }
 
 /**
+ * Does this provider error mean "this model no longer exists"?
+ *
+ * Deliberately narrow. It must match removal only — never an auth problem, a
+ * quota problem or an outage — because a match feeds the retirement counter.
+ * Confirmed live 2026-08-23:
+ *   NVIDIA     410 "The model 'minimaxai/minimax-m2.7' has reached its end of life"
+ *   OpenRouter 404 "This model is unavailable for free. The paid version ..."
+ *   LLM7       400 "Model 'gpt-oss-20b' is currently unavailable."
+ *   Cerebras   404 "Model does not exist or you do not have access to it."
+ */
+export function isGoneMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  if (m.includes('401') || m.includes('403') || m.includes('unauthorized') || m.includes('forbidden')) {
+    return false;
+  }
+  return m.includes('404')
+    || m.includes('410')
+    || m.includes('not found')
+    || m.includes('no longer available')
+    || m.includes('end of life')
+    || m.includes('has been deprecated')
+    || m.includes('is currently unavailable')
+    || m.includes('unavailable for free')
+    || m.includes('model does not exist');
+}
+
+/**
+ * Consecutive "gone" probes before a row is retired. The scout runs every 30
+ * minutes, so 3 means a model must be gone for roughly 90 minutes across three
+ * independent checks — enough to ride out an upstream blip, quick enough that a
+ * dead model leaves the routing chain the same day.
+ */
+export const GONE_STREAK_TO_RETIRE = 3;
+
+/**
+ * Advance or reset a model's gone streak, retiring it once the streak is met.
+ *
+ * Presence reconciliation against a provider's bulk /models list is deliberately
+ * NOT used: OpenRouter's list returns chat models only, so diffing against it
+ * reports embedding and image rows as missing and would disable live models.
+ * Probing each model directly is provider-agnostic and immune to that.
+ *
+ * Returns the model_id when this call retired it, otherwise null.
+ */
+export function recordGoneStreak(
+  db: ReturnType<typeof getDb>,
+  modelDbId: number,
+  isGone: boolean,
+): string | null {
+  if (!isGone) {
+    db.prepare('UPDATE model_availability SET gone_streak = 0 WHERE model_db_id = ?').run(modelDbId);
+    return null;
+  }
+
+  db.prepare('UPDATE model_availability SET gone_streak = gone_streak + 1 WHERE model_db_id = ?')
+    .run(modelDbId);
+
+  const row = db.prepare(`
+    SELECT a.gone_streak, m.platform, m.model_id, m.enabled
+    FROM model_availability a JOIN models m ON m.id = a.model_db_id
+    WHERE a.model_db_id = ?
+  `).get(modelDbId) as
+    { gone_streak: number; platform: string; model_id: string; enabled: number } | undefined;
+
+  if (!row || row.enabled !== 1 || row.gone_streak < GONE_STREAK_TO_RETIRE) return null;
+
+  db.prepare('UPDATE models SET enabled = 0 WHERE id = ?').run(modelDbId);
+  console.warn(
+    `[ModelScout] Retired ${row.platform}/${row.model_id} — gone on ${row.gone_streak} consecutive checks`,
+  );
+  return row.model_id;
+}
+
+/**
  * Check if a specific model is still available on the free tier.
  * 
  * Strategy per platform:
@@ -301,9 +376,13 @@ export async function checkModelAvailability(modelDbId: number): Promise<Availab
     if (message?.includes('429') || message?.toLowerCase().includes('rate limit')) {
       status = 'rate_limited';
       freeTierConfirmed = true; // We hit a rate limit, which means it IS free
-    } else if (message?.includes('404') || message?.toLowerCase().includes('not found')) {
+    } else if (isGoneMessage(message)) {
       status = 'deprecated';
     } else if (message?.includes('401') || message?.includes('403')) {
+      // A bad or expired key answers 401/403 for EVERY model on the platform.
+      // Classifying that as deprecated would retire an entire provider the
+      // moment a key lapsed, so it stays 'error' and never counts toward the
+      // gone streak.
       status = 'error';
     }
 
@@ -349,12 +428,19 @@ export async function scoutAllModels(delayMs = 2000): Promise<AvailabilityCheck[
   const ids = selectSweepCandidateIds(db);
   console.log(`[ModelScout] Checking ${ids.length} models...`);
   const results: AvailabilityCheck[] = [];
+  const retiredModelIds: string[] = [];
 
   for (const id of ids) {
     try {
       const result = await checkModelAvailability(id);
       results.push(result);
       console.log(`[ModelScout] ${result.platform}/${result.modelId} → ${result.status}`);
+
+      // Retire only on a repeated "gone" verdict. 'error' (transport, auth) and
+      // 'rate_limited' reset the streak, so an outage or a lapsed key can never
+      // retire anything.
+      const retired = recordGoneStreak(db, id, result.status === 'deprecated');
+      if (retired) retiredModelIds.push(retired);
       
       // Delay between checks to avoid hitting rate limits
       if (delayMs > 0) {
@@ -366,6 +452,9 @@ export async function scoutAllModels(delayMs = 2000): Promise<AvailabilityCheck[
   }
 
   console.log(`[ModelScout] Check complete. ${results.filter(r => r.status === 'free').length}/${results.length} models confirmed free.`);
+  if (retiredModelIds.length > 0) {
+    console.warn(`[ModelScout] Retired ${retiredModelIds.length} dead model(s): ${retiredModelIds.join(', ')}`);
+  }
   return results;
 }
 

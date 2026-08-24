@@ -57,6 +57,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   migrateModelsV20(db);
   migrateModelsV21(db);
   migrateModelsV22(db);
+  addGoneStreakColumn(db);
   seedModelCapabilities(db);
   // Must follow seedModelCapabilities — that is where the image rows are seeded.
   retireDeadCatalogRowsV22(db);
@@ -160,6 +161,10 @@ function createTables(db: Database.Database) {
       next_check_at TEXT,
       discovery_source TEXT,
       free_tier_confirmed INTEGER NOT NULL DEFAULT 0,
+      -- Consecutive scout cycles this model answered "gone" (404/410). Retirement
+      -- needs repetition: a single 404 can be an upstream blip, and acting on one
+      -- would let a transient failure empty the catalog.
+      gone_streak INTEGER NOT NULL DEFAULT 0,
       CHECK (status IN ('free', 'rate_limited', 'deprecated', 'error', 'unknown'))
     );
 
@@ -1797,6 +1802,18 @@ function migrateModelsV21(db: Database.Database) {
     }
   });
   apply();}
+
+/**
+ * Adds model_availability.gone_streak for scout-driven auto-retirement.
+ * Separate from the migrateModelsV* series because it is a schema change on an
+ * existing table rather than a catalog edit. Idempotent.
+ */
+function addGoneStreakColumn(db: Database.Database) {
+  const cols = db.prepare('PRAGMA table_info(model_availability)').all() as { name: string }[];
+  if (!cols.some(c => c.name === 'gone_streak')) {
+    db.prepare('ALTER TABLE model_availability ADD COLUMN gone_streak INTEGER NOT NULL DEFAULT 0').run();
+  }
+}
 
 /**
  * V22 (August 2026): retire two dead providers and the aggregator rows whose
