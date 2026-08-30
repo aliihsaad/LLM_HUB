@@ -61,6 +61,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   seedModelCapabilities(db);
   // Must follow seedModelCapabilities — that is where the image rows are seeded.
   retireDeadCatalogRowsV22(db);
+  restoreRealtimeModelsV23(db);
   flagPaidGoogleModels(db);
   purgeLegacyBazaarlinkDiscoveries(db);
   ensureUnifiedKey(db);
@@ -1802,6 +1803,52 @@ function migrateModelsV21(db: Database.Database) {
     }
   });
   apply();}
+
+/**
+ * V23 (August 2026): undo the realtime models the scout retired by mistake.
+ *
+ * The scout probes Google with generateContent. Realtime/live models are only
+ * reachable over bidiGenerateContent, so Google answers:
+ *
+ *   "models/gemini-3.1-flash-live-preview is not found for API version v1beta,
+ *    or is not supported for generateContent. Call ModelService.ListModels to
+ *    see the list of available models and their supported methods."
+ *
+ * isGoneMessage() read the 404 as removal and the streak logic disabled two
+ * models that were working perfectly. Both the message guard and the candidate
+ * query are fixed; this restores the rows the bug switched off.
+ *
+ * Scoped to rows whose ONLY capabilities are realtime/audio, so it re-enables
+ * exactly the class the probe cannot legitimately judge and never resurrects a
+ * genuinely retired chat model. Runs after seedModelCapabilities because it
+ * reads model_capabilities. Idempotent.
+ */
+function restoreRealtimeModelsV23(db: Database.Database) {
+  db.prepare(`
+    UPDATE models SET enabled = 1
+     WHERE enabled = 0
+       AND EXISTS (
+         SELECT 1 FROM model_capabilities c
+         WHERE c.model_db_id = models.id AND c.enabled = 1
+           AND c.capability IN ('realtime_audio', 'audio')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM model_capabilities c2
+         WHERE c2.model_db_id = models.id AND c2.enabled = 1
+           AND c2.capability IN ('chat', 'vision')
+       )
+  `).run();
+
+  // Clear the streak so a stale counter cannot retire them again on the next
+  // probe before the fixed candidate query excludes them.
+  db.prepare(`
+    UPDATE model_availability SET gone_streak = 0, status = 'unknown'
+     WHERE model_db_id IN (
+       SELECT c.model_db_id FROM model_capabilities c
+       WHERE c.enabled = 1 AND c.capability IN ('realtime_audio', 'audio')
+     )
+  `).run();
+}
 
 /**
  * Adds model_availability.gone_streak for scout-driven auto-retirement.

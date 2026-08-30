@@ -135,6 +135,19 @@ export function isGoneMessage(message) {
     if (m.includes('401') || m.includes('403') || m.includes('unauthorized') || m.includes('forbidden')) {
         return false;
     }
+    // "Wrong method for this model" is a 404 about the ENDPOINT, not the model.
+    // Google answers realtime/live models with:
+    //   "models/gemini-3.1-flash-live-preview is not found for API version
+    //    v1beta, or is not supported for generateContent. Call
+    //    ModelService.ListModels to see ... their supported methods."
+    // The model is alive and reachable over bidiGenerateContent; only the probe
+    // used the wrong endpoint. Treating this as removal retired two working
+    // Gemini realtime models in production.
+    if (m.includes('is not supported for')
+        || m.includes('supported methods')
+        || m.includes('not supported by')) {
+        return false;
+    }
     return m.includes('404')
         || m.includes('410')
         || m.includes('not found')
@@ -311,8 +324,26 @@ export async function checkModelAvailability(modelDbId) {
  *  while free-only mode is on so probes never spend key credit. */
 export function selectSweepCandidateIds(db) {
     const freeOnly = isFreeOnlyMode(db);
+    // The probe is a chat / generateContent call, so a model exposing only
+    // realtime, speech or embedding capabilities can never answer it. Google
+    // replies "not supported for generateContent" and the row looks dead — that
+    // retired two working Gemini realtime models in production. Probe a model
+    // only when it advertises a chat-shaped capability, or advertises none at
+    // all (the router treats an empty capability set as unrestricted).
     const rows = db.prepare(`
-    SELECT id FROM models WHERE enabled = 1 ${freeOnly ? 'AND is_free = 1' : ''}
+    SELECT m.id FROM models m
+    WHERE m.enabled = 1 ${freeOnly ? 'AND m.is_free = 1' : ''}
+      AND (
+        EXISTS (
+          SELECT 1 FROM model_capabilities c
+          WHERE c.model_db_id = m.id AND c.enabled = 1
+            AND c.capability IN ('chat', 'vision')
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM model_capabilities c2
+          WHERE c2.model_db_id = m.id AND c2.enabled = 1
+        )
+      )
   `).all();
     return rows.map(r => r.id);
 }
