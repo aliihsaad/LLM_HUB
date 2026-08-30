@@ -105,3 +105,32 @@ describe('recordGoneStreak', () => {
     expect(recordGoneStreak(db, modelId, true)).toBeNull();
   });
 });
+
+/**
+ * Regression: the scout retired two working Gemini realtime models.
+ *
+ * It probes Google with generateContent, but realtime models only answer over
+ * bidiGenerateContent, so Google returns a 404 that means "wrong endpoint",
+ * not "model removed". isGoneMessage matched the 404 and three cycles later
+ * both rows were disabled — while they were working perfectly in the app.
+ */
+describe('wrong-method 404s are not deprecation', () => {
+  const wrongMethod = [
+    'Google API error 404: models/gemini-3.1-flash-live-preview is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.',
+    'Google API error 404: models/gemini-2.5-flash-native-audio-preview-12-2025 is not found for API version v1beta, or is not supported for generateContent.',
+    'API error 404: this model is not supported by the completions endpoint',
+  ];
+
+  for (const msg of wrongMethod) {
+    it(`keeps the model when the endpoint is wrong: ${msg.slice(30, 78)}…`, () => {
+      expect(isGoneMessage(msg)).toBe(false);
+    });
+  }
+
+  it('still retires a genuine Google removal', () => {
+    // No "supported methods" clause — the model really is gone.
+    expect(isGoneMessage(
+      'Google API error 404: This model models/gemini-2.5-pro is no longer available to new users',
+    )).toBe(true);
+  });
+});
