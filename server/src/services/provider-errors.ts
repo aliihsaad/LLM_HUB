@@ -31,8 +31,14 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   // before the generic 403 branch, which would otherwise read them as
   // model_unavailable. Live example logged 50 times on the VPS:
   // "Google API error 403: Your project has been denied access."
+  // HTTP 402 belongs here too: it is a billing state of the account, and it
+  // repeats on every model — "Cerebras API error 402: Payment required to
+  // access this resource." Matched before the rate-limit branch because some
+  // 402 bodies also say "quota".
   if (
-    msg.includes('organization has been restricted')
+    /\b402\b/.test(msg)
+    || msg.includes('payment required')
+    || msg.includes('organization has been restricted')
     || msg.includes('organization is restricted')
     || msg.includes('project has been denied access')
     || msg.includes('has been denied access')

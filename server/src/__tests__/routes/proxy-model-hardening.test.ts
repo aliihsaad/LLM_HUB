@@ -357,4 +357,70 @@ describe('Proxy model hardening', () => {
     });
     expect(health?.blocked_until).toBeTruthy();
   });
+
+  it('falls back past a payment-required provider and stops picking it', async () => {
+    const billedModel = 'gpt-oss-120b';
+    const fallbackModel = 'llama-3.3-70b-versatile';
+    enableOnlyFallback([
+      { platform: 'cerebras', modelId: billedModel, priority: 1 },
+      { platform: 'groq', modelId: fallbackModel, priority: 2 },
+    ]);
+    addKey('cerebras', 'csk-test');
+    addKey('groq', 'gsk-test');
+
+    let cerebrasCalls = 0;
+    const origFetch = global.fetch;
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.includes('api.cerebras.ai/v1/chat/completions')) {
+        cerebrasCalls++;
+        return {
+          ok: false,
+          status: 402,
+          statusText: 'Payment Required',
+          json: () => Promise.resolve({ message: 'Payment required to access this resource. Visit your billing tab.' }),
+        } as any;
+      }
+      if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'chatcmpl-402',
+            object: 'chat.completion',
+            created: 123,
+            model: fallbackModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 4, completion_tokens: 1, total_tokens: 5 },
+          }),
+        } as any;
+      }
+      return origFetch(url, init);
+    });
+
+    // Before the fix this was a 502 "Provider error (GPT-OSS 120B (Cerebras))".
+    const first = await request(app, 'POST', '/v1/chat/completions', {
+      messages: [{ role: 'user', content: 'hey' }],
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get('x-routed-via')).toBe(`groq/${fallbackModel}`);
+    expect(cerebrasCalls).toBe(1);
+
+    // The credential is benched, so the next request does not pay for the
+    // same 402 again.
+    const second = await request(app, 'POST', '/v1/chat/completions', {
+      messages: [{ role: 'user', content: 'hi again' }],
+    });
+    expect(second.status).toBe(200);
+    expect(second.headers.get('x-routed-via')).toBe(`groq/${fallbackModel}`);
+    expect(cerebrasCalls).toBe(1);
+
+    // The model itself is not quarantined — the account is the problem.
+    const health = getDb().prepare(`
+      SELECT h.blocked_until
+      FROM model_runtime_health h
+      JOIN models m ON m.id = h.model_db_id
+      WHERE m.platform = 'cerebras' AND m.model_id = ?
+    `).get(billedModel) as { blocked_until: string | null } | undefined;
+    expect(health?.blocked_until ?? null).toBeNull();
+  });
 });
