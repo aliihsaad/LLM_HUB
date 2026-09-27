@@ -430,6 +430,8 @@ export interface AudioTextResult {
 export type RealtimeResponseModality = 'AUDIO' | 'TEXT';
 
 export interface RealtimeSessionRequest {
+  /** Let the client supply unset Live fields (VAD, thinking, compression, resumption). Minted fields remain locked. */
+  allow_client_config?: boolean;
   model?: string;
   provider?: 'google';
   instructions?: string;
@@ -456,6 +458,7 @@ export interface RealtimeSessionResponse {
   };
   connect_url: string;
   config: {
+    client_config_allowed?: boolean;
     response_modalities: RealtimeResponseModality[];
     input_audio_transcription?: boolean;
     output_audio_transcription?: boolean;

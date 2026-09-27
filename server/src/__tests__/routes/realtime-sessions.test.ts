@@ -87,6 +87,8 @@ describe('Realtime sessions proxy route', () => {
     expect(body.config.output_audio_transcription).toBe(true);
 
     expect(providerBody.uses).toBe(1);
+    expect(providerBody.fieldMask).toBeUndefined();
+    expect(body.config.client_config_allowed).toBeUndefined();
     expect(providerBody.bidiGenerateContentSetup.model).toBe('models/gemini-2.5-flash-native-audio-preview-12-2025');
     expect(providerBody.bidiGenerateContentSetup.systemInstruction.parts[0].text).toBe('You are concise.');
     expect(providerBody.bidiGenerateContentSetup.generationConfig.responseModalities).toEqual(['AUDIO']);
@@ -143,6 +145,7 @@ describe('Realtime sessions proxy route', () => {
         },
       ],
       tool_choice: 'auto',
+      allow_client_config: true,
     });
 
     expect(status).toBe(200);
@@ -163,6 +166,10 @@ describe('Realtime sessions proxy route', () => {
     expect(setup.toolConfig).toEqual({ functionCallingConfig: { mode: 'AUTO' } });
 
     expect(body.config.tools).toEqual(['solve_with_openrouter', 'analyze_current_screen']);
+    expect(body.config.client_config_allowed).toBe(true);
+    expect(providerBody.fieldMask.split(',')).toEqual(['model', 'generationConfig.responseModalities', 'tools', 'toolConfig']);
+    expect(providerBody.fieldMask).not.toContain('sessionResumption');
+    expect(providerBody.fieldMask).not.toContain('realtimeInputConfig');
   });
 
   it('omits tools and toolConfig from setup when none are sent', async () => {

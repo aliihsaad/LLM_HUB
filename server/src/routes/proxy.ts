@@ -449,6 +449,7 @@ const speechSchema: z.ZodType<SpeechRequest> = z.object({
 });
 
 const realtimeSessionSchema: z.ZodType<RealtimeSessionRequest> = z.object({
+  allow_client_config: z.boolean().optional(),
   model: z.string().optional(),
   provider: z.literal('google').optional(),
   instructions: z.string().optional(),
