@@ -674,6 +674,18 @@ export class GoogleProvider extends BaseProvider {
             newSessionExpireTime,
             uses: 1,
             bidiGenerateContentSetup: setup,
+            // Google's REST fieldMask is the equivalent of SDK lockAdditionalFields: [].
+            // Lock the values minted above, allowing only previously unset fields to be supplied by a client.
+            // Existing clients retain the previous all-fields-locked behavior unless they explicitly opt in.
+            ...(request.allow_client_config ? { fieldMask: [
+                    'model', 'generationConfig.responseModalities',
+                    ...(request.temperature !== undefined ? ['generationConfig.temperature'] : []),
+                    ...(request.voice ? ['generationConfig.speechConfig'] : []),
+                    ...(request.instructions ? ['systemInstruction'] : []),
+                    ...(request.input_audio_transcription ? ['inputAudioTranscription'] : []),
+                    ...(request.output_audio_transcription ? ['outputAudioTranscription'] : []),
+                    ...(geminiTools ? ['tools'] : []), ...(geminiToolConfig ? ['toolConfig'] : []),
+                ].join(',') } : {}),
         };
         const res = await this.fetchWithTimeout(`${API_BASE_V1ALPHA}/auth_tokens?key=${apiKey}`, {
             method: 'POST',
@@ -703,6 +715,7 @@ export class GoogleProvider extends BaseProvider {
             },
             connect_url: `${GEMINI_LIVE_CONSTRAINED_WS_URL}?access_token=${encodeURIComponent(token)}`,
             config: {
+                ...(request.allow_client_config ? { client_config_allowed: true } : {}),
                 response_modalities: responseModalities,
                 input_audio_transcription: request.input_audio_transcription,
                 output_audio_transcription: request.output_audio_transcription,

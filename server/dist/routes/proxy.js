@@ -375,6 +375,7 @@ const speechSchema = z.object({
     user: z.string().optional(),
 });
 const realtimeSessionSchema = z.object({
+    allow_client_config: z.boolean().optional(),
     model: z.string().optional(),
     provider: z.literal('google').optional(),
     instructions: z.string().optional(),
