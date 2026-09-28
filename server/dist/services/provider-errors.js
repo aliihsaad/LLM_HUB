@@ -2,6 +2,11 @@ export function classifyProviderError(err) {
     const msg = err instanceof Error
         ? err.message.toLowerCase()
         : String(err?.message ?? err ?? '').toLowerCase();
+    // Read actual status metadata or our adapters' leading status prefix. Digits
+    // inside retry delays, request IDs, or response bodies are not HTTP statuses.
+    const metadata = err;
+    const status = Number(metadata?.status ?? metadata?.statusCode ?? metadata?.response?.status
+        ?? msg.match(/^(?:(?:[\w.-]+ )*api error\s+|http(?: error)?[:\s]+|status(?: code)?[:\s]+)?([45]\d{2})(?=[:\s]|$)/)?.[1]);
     const isZeroQuotaLimit = /(?:quota|rate|request|token|capacity|free[_ -]?tier|limit).{0,200}\blimit\s*[:=]\s*0\b/s.test(msg)
         || /\blimit\s*[:=]\s*0\b.{0,200}(?:quota|rate|request|token|capacity|free[_ -]?tier)/s.test(msg);
     if (isZeroQuotaLimit) {
@@ -17,7 +22,7 @@ export function classifyProviderError(err) {
     // repeats on every model — "Cerebras API error 402: Payment required to
     // access this resource." Matched before the rate-limit branch because some
     // 402 bodies also say "quota".
-    if (/\b402\b/.test(msg)
+    if (status === 402
         || msg.includes('payment required')
         || msg.includes('organization has been restricted')
         || msg.includes('organization is restricted')
@@ -33,21 +38,24 @@ export function classifyProviderError(err) {
             cooldownScope: 'key',
         };
     }
-    if (msg.includes('401')
+    if (status === 401
         || msg.includes('unauthorized')
         || msg.includes('invalid api key')
-        || msg.includes('invalid_api_key')) {
+        || msg.includes('invalid_api_key')
+        || msg.includes('api key not valid')
+        || msg.includes('api_key_invalid')
+        || msg.includes('api key expired')) {
         return { category: 'auth', retryable: false, skipModel: false, keyCooldownMs: 0 };
     }
-    if (msg.includes('404')
-        || msg.includes('410')
+    if (status === 404
+        || status === 410
         || msg.includes('not found')
         || msg.includes('model does not exist')
         || msg.includes('unavailable_model')
         || msg.includes('no endpoints found')) {
         return { category: 'model_unavailable', retryable: true, skipModel: true, keyCooldownMs: 0 };
     }
-    if (msg.includes('403')
+    if (status === 403
         || msg.includes('forbidden')
         || msg.includes('subscription')
         || msg.includes('requires a paid')
@@ -56,7 +64,7 @@ export function classifyProviderError(err) {
         || msg.includes('accept the terms')) {
         return { category: 'model_unavailable', retryable: true, skipModel: true, keyCooldownMs: 0 };
     }
-    if (msg.includes('429')
+    if (status === 429
         || msg.includes('rate limit')
         || msg.includes('too many requests')
         || msg.includes('quota')
@@ -70,9 +78,9 @@ export function classifyProviderError(err) {
         || msg.includes('econnreset')) {
         return { category: 'timeout', retryable: true, skipModel: true, keyCooldownMs: 120_000 };
     }
-    if (msg.includes('503')
+    if (status === 503
         || msg.includes('unavailable')
-        || msg.includes('500')
+        || status === 500
         || msg.includes('internal server error')) {
         return { category: 'provider', retryable: true, skipModel: true, keyCooldownMs: 60_000 };
     }

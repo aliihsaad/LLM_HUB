@@ -52,6 +52,7 @@ const GOOGLE_MODELS_API_BASE = 'https://generativelanguage.googleapis.com/v1beta
 /** Google chat models confirmed free on the Gemini API (ai.google.dev pricing:
  *  Free Tier column reads "Free of charge"). These auto-enable on discovery. */
 const GOOGLE_FREE_CHAT_MODELS = new Map<string, string>([
+  ['gemini-3.8-flash', 'Gemini 3.8 Flash'],
   ['gemini-3.6-flash', 'Gemini 3.6 Flash'],
   ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
   ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'],
@@ -60,6 +61,11 @@ const GOOGLE_FREE_CHAT_MODELS = new Map<string, string>([
   ['gemini-2.5-flash', 'Gemini 2.5 Flash'],
   ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
   ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite'],
+]);
+
+const GOOGLE_FREE_LIVE_MODELS = new Map<string, string>([
+  ['gemini-3.8-live', 'Gemini 3.8 Live'],
+  ['gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview'],
 ]);
 
 /** Model families that are not chat completions — discovering them would only
@@ -102,6 +108,7 @@ export function classifyGoogleModel(modelId: string, apiDisplayName?: string): G
 }
 
 interface GoogleModelListResponse {
+  nextPageToken?: string;
   models?: Array<{
     name?: string;
     displayName?: string;
@@ -109,7 +116,7 @@ interface GoogleModelListResponse {
   }>;
 }
 
-type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
+type DiscoveredModelCapability = 'chat' | 'vision' | 'video' | 'realtime_audio';
 
 interface OpenAICompatModelListEntry {
   id?: string;
@@ -155,32 +162,46 @@ function supportsVideoInput(entry: OpenAICompatModelListEntry): boolean {
 }
 
 async function discoverGoogleModels(apiKey: string, knownSet: Set<string>): Promise<DiscoveredModelCandidate[]> {
-  const res = await fetch(`${GOOGLE_MODELS_API_BASE}/models?key=${encodeURIComponent(apiKey)}`);
-  if (!res.ok) return [];
-
-  const data = await res.json() as GoogleModelListResponse;
   const discoveries: DiscoveredModelCandidate[] = [];
+  const seenModels = new Set(knownSet);
+  const seenPages = new Set<string>();
+  // One deadline for the whole scan, plus a page cap for pathological upstreams.
+  const signal = AbortSignal.timeout(15_000);
+  let pageToken = '';
+  for (let page = 0; page < 20; page++) {
+    const url = new URL(`${GOOGLE_MODELS_API_BASE}/models`);
+    url.searchParams.set('pageSize', '1000');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    const res = await fetch(url.toString(), { headers: { 'x-goog-api-key': apiKey }, signal });
+    if (!res.ok) break;
+    const data = await res.json() as GoogleModelListResponse;
 
-  for (const entry of data.models ?? []) {
-    const modelId = entry.name?.replace(/^models\//, '');
-    if (!modelId || knownSet.has(modelId)) continue;
-    if (!entry.supportedGenerationMethods?.includes('generateContent')) continue;
+    for (const entry of data.models ?? []) {
+      const modelId = entry.name?.replace(/^models\//, '');
+      if (!modelId || seenModels.has(modelId)) continue;
+      const realtime = entry.supportedGenerationMethods?.includes('bidiGenerateContent') === true;
+      if (!realtime && !entry.supportedGenerationMethods?.includes('generateContent')) continue;
 
-    const verdict = classifyGoogleModel(modelId, entry.displayName);
-    if (!verdict.include) continue;
-
-    discoveries.push({
-      platform: 'google',
-      modelId,
-      displayName: verdict.displayName,
-      enabledByDefault: verdict.enabledByDefault,
-      isFree: verdict.isFree,
-      // Vision/video are only claimed for models we have actually confirmed;
-      // an unrecognised model gets plain chat until an operator reviews it.
-      capabilities: verdict.enabledByDefault ? ['chat', 'vision', 'video'] : ['chat'],
-    });
+      const liveName = GOOGLE_FREE_LIVE_MODELS.get(modelId);
+      const verdict = realtime ? {
+        include: true as const,
+        displayName: entry.displayName ?? liveName ?? modelId,
+        enabledByDefault: liveName != null,
+        isFree: liveName != null,
+      } : classifyGoogleModel(modelId, entry.displayName);
+      if (!verdict.include) continue;
+      seenModels.add(modelId);
+      discoveries.push({
+        platform: 'google', modelId, displayName: verdict.displayName,
+        enabledByDefault: verdict.enabledByDefault, isFree: verdict.isFree,
+        // The list's bidi method is not evidence of chat/vision support.
+        capabilities: realtime ? ['realtime_audio'] : verdict.enabledByDefault ? ['chat', 'vision', 'video'] : ['chat'],
+      });
+    }
+    if (!data.nextPageToken || seenPages.has(data.nextPageToken)) break;
+    pageToken = data.nextPageToken;
+    seenPages.add(pageToken);
   }
-
   return discoveries;
 }
 
@@ -282,14 +303,15 @@ export function recordGoneStreak(
  * — Google: hit the model-specific generateContent endpoint with a dummy prompt.
  * — Cloudflare: hit the @cf/{model}/ai/run endpoint.
  * 
- * A 200 with content = free, 429 = rate_limited (still free), 401/403 = deprecated or invalid key,
+ * A 200 confirms reachability, not pricing; only catalog-confirmed free rows
+ * retain free-tier confirmation. 429 = rate_limited, 401/403 = key error,
  * 404 = deprecated (model removed), transport error = error.
  */
 export async function checkModelAvailability(modelDbId: number): Promise<AvailabilityCheck> {
   const db = getDb();
 
   const model = db.prepare(`
-    SELECT m.id, m.platform, m.model_id, m.display_name, k.id AS key_id, k.encrypted_key, k.iv, k.auth_tag
+    SELECT m.id, m.platform, m.model_id, m.display_name, m.is_free, k.id AS key_id, k.encrypted_key, k.iv, k.auth_tag
     FROM models m
     LEFT JOIN api_keys k ON k.platform = m.platform AND k.enabled = 1
     WHERE m.id = ?
@@ -300,6 +322,7 @@ export async function checkModelAvailability(modelDbId: number): Promise<Availab
     platform: string;
     model_id: string;
     display_name: string;
+    is_free: number;
     key_id: number | null;
     encrypted_key: string | null;
     iv: string | null;
@@ -320,6 +343,8 @@ export async function checkModelAvailability(modelDbId: number): Promise<Availab
 
   const platform = model.platform as Platform;
   const modelId = model.model_id;
+  // Reachability and rate limiting do not establish pricing.
+  const knownFree = model.is_free === 1 && (platform !== 'google' || GOOGLE_FREE_CHAT_MODELS.has(modelId));
 
   // No configured key for this platform
   if (!model.key_id || !model.encrypted_key) {
@@ -364,9 +389,9 @@ export async function checkModelAvailability(modelDbId: number): Promise<Availab
       modelDbId,
       platform,
       modelId,
-      status: 'free',
+      status: knownFree ? 'free' : 'unknown',
       lastCheckAt: new Date().toISOString(),
-      freeTierConfirmed: true,
+      freeTierConfirmed: knownFree,
     };
 
     db.prepare(`
@@ -390,7 +415,7 @@ export async function checkModelAvailability(modelDbId: number): Promise<Availab
     
     if (message?.includes('429') || message?.toLowerCase().includes('rate limit')) {
       status = 'rate_limited';
-      freeTierConfirmed = true; // We hit a rate limit, which means it IS free
+      freeTierConfirmed = knownFree;
     } else if (isGoneMessage(message)) {
       status = 'deprecated';
     } else if (message?.includes('401') || message?.includes('403')) {
@@ -691,8 +716,8 @@ export async function discoverAndPersistNewModels(): Promise<DiscoveredModelResu
 
       const modelDbId = Number(result.lastInsertRowid);
       updateCategory.run(categorize.category, categorize.specializations.join(','), modelDbId);
-      insertFallback.run(modelDbId, nextPriority++, enabled);
-      insertAvailability.run(modelDbId, discoverySource, enabled);
+      insertFallback.run(modelDbId, nextPriority++, candidate.capabilities?.includes('realtime_audio') ? 0 : enabled);
+      insertAvailability.run(modelDbId, discoverySource, candidate.isFree === true ? 1 : 0);
       // New discovered rows are assumed chat-capable by default. Providers
       // that expose modality metadata can add narrower capability routes too.
       for (const capability of new Set(candidate.capabilities ?? ['chat'])) {

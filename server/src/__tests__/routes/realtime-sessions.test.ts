@@ -75,10 +75,10 @@ describe('Realtime sessions proxy route', () => {
     });
 
     expect(status).toBe(200);
-    expect(headers.get('X-Routed-Via')).toContain('google/gemini-2.5-flash-native-audio-preview-12-2025');
+    expect(headers.get('X-Routed-Via')).toContain('google/gemini-3.8-live');
     expect(body.object).toBe('realtime.session');
     expect(body.provider).toBe('google');
-    expect(body.model).toBe('gemini-2.5-flash-native-audio-preview-12-2025');
+    expect(body.model).toBe('gemini-3.8-live');
     expect(body.client_secret.value).toBe('authTokens/test-realtime-token');
     expect(body.connect_url).toContain('BidiGenerateContentConstrained');
     expect(body.connect_url).toContain('access_token=authTokens%2Ftest-realtime-token');
@@ -89,7 +89,7 @@ describe('Realtime sessions proxy route', () => {
     expect(providerBody.uses).toBe(1);
     expect(providerBody.fieldMask).toBeUndefined();
     expect(body.config.client_config_allowed).toBeUndefined();
-    expect(providerBody.bidiGenerateContentSetup.model).toBe('models/gemini-2.5-flash-native-audio-preview-12-2025');
+    expect(providerBody.bidiGenerateContentSetup.model).toBe('models/gemini-3.8-live');
     expect(providerBody.bidiGenerateContentSetup.systemInstruction.parts[0].text).toBe('You are concise.');
     expect(providerBody.bidiGenerateContentSetup.generationConfig.responseModalities).toEqual(['AUDIO']);
     expect(providerBody.bidiGenerateContentSetup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe('Kore');

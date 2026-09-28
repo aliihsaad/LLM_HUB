@@ -63,6 +63,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   retireDeadCatalogRowsV22(db);
   restoreRealtimeModelsV23(db);
   flagPaidGoogleModels(db);
+  migrateGoogleCatalogV24(db);
   purgeLegacyBazaarlinkDiscoveries(db);
   ensureUnifiedKey(db);
 
@@ -1011,6 +1012,8 @@ function seedModelCapabilities(db: Database.Database) {
       AND lower(model_id) NOT LIKE '%whisper%'
       AND lower(model_id) NOT LIKE '%live%'
       AND lower(model_id) NOT LIKE '%native-audio%'
+      AND NOT EXISTS (SELECT 1 FROM model_capabilities c
+        WHERE c.model_db_id = models.id AND c.capability = 'realtime_audio')
   `).all() as { id: number; intelligence_rank: number; enabled: number }[];
 
   const visionModels = db.prepare(`
@@ -1024,6 +1027,8 @@ function seedModelCapabilities(db: Database.Database) {
       AND lower(model_id) NOT LIKE '%tts%'
       AND lower(model_id) NOT LIKE '%live%'
       AND lower(model_id) NOT LIKE '%native-audio%'
+      AND NOT EXISTS (SELECT 1 FROM model_capabilities c
+        WHERE c.model_db_id = models.id AND c.capability = 'realtime_audio')
   `).all() as { id: number; intelligence_rank: number; enabled: number }[];
 
   const insertCapabilityModel = db.prepare(`
@@ -1141,8 +1146,8 @@ function seedModelCapabilities(db: Database.Database) {
   ]> = [
     ['google', 'gemini-2.5-flash-preview-tts', 'Gemini 2.5 Flash TTS', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
     ['google', 'gemini-3.1-flash-tts-preview', 'Gemini 3.1 Flash TTS Preview', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192],
-    ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
-    ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768],
+    ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 45, 2, 'Realtime Audio', null, null, null, null, 'audio', 32768],
+    ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', null, null, null, null, 'audio', 32768],
     ['groq', 'canopylabs/orpheus-v1-english', 'Orpheus TTS English (Groq)', 50, 2, 'Speech', null, null, null, null, 'audio', 0],
     ['groq', 'canopylabs/orpheus-arabic-saudi', 'Orpheus TTS Arabic Saudi (Groq)', 51, 2, 'Speech', null, null, null, null, 'audio', 0],
     ['groq', 'whisper-large-v3-turbo', 'Whisper Large V3 Turbo (Groq)', 51, 4, 'Audio', null, null, null, null, 'audio', 0],
@@ -1280,7 +1285,7 @@ function seedModelCapabilities(db: Database.Database) {
       const row = getModelId.get(platform, modelId) as { id: number } | undefined;
       if (row) {
         addCapability.run(row.id, capability, priority, 1);
-        updateCapabilityPriority.run(priority, 1, row.id, capability);
+        if (capability !== 'realtime_audio') updateCapabilityPriority.run(priority, 1, row.id, capability);
       }
     }
 
@@ -1409,10 +1414,10 @@ function migrateModelsV14(db: Database.Database) {
     ['google', 'gemini-2.5-flash', 'Gemini 2.5 Flash', 4, 5, 'Large', 10, 20, 250000, null, '~3M', 1048576, 1],
     ['google', 'gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite', 8, 3, 'Medium', 15, 20, 250000, null, '~3M', 1048576, 1],
     ['google', 'gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite', 9, 3, 'Medium', 15, 20, 250000, null, '~3M', 1048576, 1],
-    ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 46, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768, 1],
+    ['google', 'gemini-3.1-flash-live-preview', 'Gemini 3.1 Flash Live Preview', 46, 2, 'Realtime Audio', null, null, null, null, 'audio', 32768, 1],
     ['google', 'gemini-3.1-flash-tts-preview', 'Gemini 3.1 Flash TTS Preview', 50, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192, 1],
     ['google', 'gemini-2.5-flash-preview-tts', 'Gemini 2.5 Flash TTS', 51, 5, 'Audio', 5, 20, 250000, null, 'audio', 8192, 1],
-    ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', 5, 20, 250000, null, 'audio', 32768, 1],
+    ['google', 'gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio Preview', 45, 2, 'Realtime Audio', null, null, null, null, 'audio', 32768, 1],
   ];
 
   const upsertMetadata = db.prepare(`
@@ -1450,12 +1455,16 @@ function migrateModelsV14(db: Database.Database) {
     UPDATE fallback_config
        SET enabled = (SELECT enabled FROM models WHERE models.id = fallback_config.model_db_id)
      WHERE model_db_id IN (SELECT id FROM models WHERE platform = 'google')
+       AND NOT EXISTS (SELECT 1 FROM model_capabilities c
+         WHERE c.model_db_id = fallback_config.model_db_id AND c.capability = 'realtime_audio')
   `);
   const getModel = db.prepare('SELECT id, enabled FROM models WHERE platform = ? AND model_id = ?');
 
   const apply = db.transaction(() => {
     for (const model of currentGoogleFreeModels) {
       insert.run(...model);
+      // Realtime quotas are project-specific; preserve operator configuration.
+      if (model[5] === 'Realtime Audio') continue;
       upsertMetadata.run(
         model[2],
         model[3],
@@ -1824,6 +1833,7 @@ function migrateModelsV21(db: Database.Database) {
  * reads model_capabilities. Idempotent.
  */
 function restoreRealtimeModelsV23(db: Database.Database) {
+  if (db.prepare("SELECT 1 FROM settings WHERE key = 'v24_google_catalog_applied'").get()) return;
   db.prepare(`
     UPDATE models SET enabled = 1
      WHERE enabled = 0
@@ -2044,6 +2054,56 @@ function flagPaidGoogleModels(db: Database.Database) {
   ];
   const apply = db.transaction(() => {
     for (const modelId of paidGoogleModels) markPaid.run(modelId);
+  });
+  apply();
+}
+
+/** Confirmed free via Google pricing and Flash/Live probes (September 2026).
+ * Numeric generation/Live quotas are project-specific, not auth_tokens quotas. */
+function migrateGoogleCatalogV24(db: Database.Database) {
+  const appliedKey = 'v24_google_catalog_applied';
+  if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(appliedKey)) return;
+
+  const apply = db.transaction(() => {
+    const upsert = db.prepare(`
+      INSERT INTO models (platform, model_id, display_name, intelligence_rank, speed_rank,
+        size_label, monthly_token_budget, enabled, is_free)
+      VALUES ('google', ?, ?, ?, ?, ?, '', 1, 1)
+      ON CONFLICT(platform, model_id) DO UPDATE SET
+        display_name = excluded.display_name, intelligence_rank = excluded.intelligence_rank,
+        speed_rank = excluded.speed_rank, size_label = excluded.size_label, enabled = 1, is_free = 1
+    `);
+    const addCapability = db.prepare(`
+      INSERT INTO model_capabilities (model_db_id, capability, priority, enabled) VALUES (?, ?, ?, 1)
+      ON CONFLICT(model_db_id, capability) DO UPDATE SET priority = excluded.priority, enabled = 1
+    `);
+    const addFallback = db.prepare(`
+      INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, ?)
+      ON CONFLICT(model_db_id) DO UPDATE SET enabled = excluded.enabled
+    `);
+    for (const [id, name, rank, speed, size, capabilities] of [
+      ['gemini-3.8-flash', 'Gemini 3.8 Flash', 1, 5, 'Frontier', ['chat', 'vision', 'video']],
+      ['gemini-3.8-live', 'Gemini 3.8 Live', 44, 2, 'Realtime Audio', ['realtime_audio']],
+    ] as const) {
+      upsert.run(id, name, rank, speed, size);
+      const row = db.prepare("SELECT id FROM models WHERE platform = 'google' AND model_id = ?").get(id) as { id: number };
+      db.prepare('UPDATE model_capabilities SET enabled = 0 WHERE model_db_id = ?').run(row.id);
+      for (const capability of capabilities) addCapability.run(row.id, capability, capability === 'realtime_audio' ? 1 : rank);
+      addFallback.run(row.id, rank, id === 'gemini-3.8-flash' ? 1 : 0);
+      db.prepare(`INSERT INTO model_availability (model_db_id, status, free_tier_confirmed)
+        VALUES (?, 'unknown', 1) ON CONFLICT(model_db_id) DO UPDATE SET free_tier_confirmed = 1`).run(row.id);
+    }
+
+    db.prepare(`UPDATE models SET
+      rpm_limit = CASE WHEN rpm_limit = 5 THEN NULL ELSE rpm_limit END,
+      rpd_limit = CASE WHEN rpd_limit = 20 THEN NULL ELSE rpd_limit END,
+      tpm_limit = CASE WHEN tpm_limit = 250000 THEN NULL ELSE tpm_limit END
+      WHERE platform = 'google' AND model_id IN (
+        'gemini-3.1-flash-live-preview', 'gemini-2.5-flash-native-audio-preview-12-2025')`).run();
+    const fallback = db.prepare("SELECT id FROM models WHERE platform = 'google' AND model_id = 'gemini-3.1-flash-live-preview'").get() as { id: number };
+    db.prepare('UPDATE models SET enabled = 1, is_free = 1 WHERE id = ?').run(fallback.id);
+    addCapability.run(fallback.id, 'realtime_audio', 2);
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(appliedKey, '1');
   });
   apply();
 }

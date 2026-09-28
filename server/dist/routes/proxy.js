@@ -1542,6 +1542,33 @@ function realtimeWebSocketNotSupported(_req, res) {
 }
 proxyRouter.get('/realtime', realtimeWebSocketNotSupported);
 proxyRouter.post('/realtime', realtimeWebSocketNotSupported);
+function sendRealtimeFailure(res, providerError, routingError) {
+    if (routingError?.code === 'local_routing_limited') {
+        res.status(routingError.status).json({
+            error: {
+                message: routingError.message,
+                type: 'routing_error',
+                code: routingError.code,
+                diagnostics: routingError.diagnostics,
+                ...(providerError ? { previous_provider_failure: { category: classifyProviderError(providerError).category } } : {}),
+            },
+        });
+        return;
+    }
+    const category = providerError ? classifyProviderError(providerError).category : undefined;
+    const rateLimited = category === 'rate_limit' || category === 'zero_quota';
+    const status = providerError
+        ? (rateLimited ? 429 : category === 'other' ? 502 : 503)
+        : (routingError?.status ?? 503);
+    res.status(status).json({
+        error: {
+            message: providerError ? `Realtime provider failure: ${providerError.message}` : routingError?.message,
+            type: providerError ? (rateLimited ? 'rate_limit_error' : 'provider_unavailable') : 'routing_error',
+            code: providerError ? category : routingError?.code,
+            ...(routingError?.diagnostics ? { diagnostics: routingError.diagnostics } : {}),
+        },
+    });
+}
 proxyRouter.post('/realtime/sessions', async (req, res) => {
     const start = Date.now();
     if (!authenticateProxyRequest(req, res))
@@ -1579,15 +1606,10 @@ proxyRouter.post('/realtime/sessions', async (req, res) => {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         let route;
         try {
-            route = routeCapabilityRequest('realtime_audio', estimatedTokens, skipKeys.size > 0 ? skipKeys : undefined, requestedModel, skipModels.size > 0 ? skipModels : undefined);
+            route = routeCapabilityRequest('realtime_audio', estimatedTokens, skipKeys.size > 0 ? skipKeys : undefined, requestedModel, skipModels.size > 0 ? skipModels : undefined, request.provider);
         }
         catch (err) {
-            res.status(err.status ?? 503).json({
-                error: {
-                    message: lastError ? `All realtime audio models rate-limited. Last error: ${lastError.message}` : err.message,
-                    type: lastError ? 'rate_limit_error' : 'routing_error',
-                },
-            });
+            sendRealtimeFailure(res, lastError, err);
             return;
         }
         recordRequest(route.platform, route.modelId, route.keyId);
@@ -1606,6 +1628,12 @@ proxyRouter.post('/realtime/sessions', async (req, res) => {
             const latency = Date.now() - start;
             logRequest(route.platform, route.modelId, 'error', estimatedTokens, 0, latency, err.message);
             const failure = classifyProviderError(err);
+            // Credential rotation is Live-specific; keep other endpoint contracts intact.
+            if (failure.category === 'auth') {
+                failure.retryable = true;
+                failure.keyCooldownMs = 24 * 60 * 60 * 1000;
+                failure.cooldownScope = 'key';
+            }
             if (canRetryProviderFailure(failure, requestedModel)) {
                 prepareProviderRetry(route, failure, err, skipKeys, skipModels);
                 lastError = err;
@@ -1613,21 +1641,11 @@ proxyRouter.post('/realtime/sessions', async (req, res) => {
                 continue;
             }
             recordTerminalProviderFailure(route, failure, err);
-            res.status(502).json({
-                error: {
-                    message: `Provider error (${route.displayName}): ${err.message}`,
-                    type: 'provider_error',
-                },
-            });
+            sendRealtimeFailure(res, err);
             return;
         }
     }
-    res.status(429).json({
-        error: {
-            message: `All realtime audio models rate-limited after ${MAX_RETRIES} attempts. Last: ${lastError?.message}`,
-            type: 'rate_limit_error',
-        },
-    });
+    sendRealtimeFailure(res, lastError);
 });
 proxyRouter.post('/audio/speech', async (req, res) => {
     const start = Date.now();

@@ -45,7 +45,7 @@ export type GoogleModelVerdict = {
  * spend until an operator confirms it.
  */
 export declare function classifyGoogleModel(modelId: string, apiDisplayName?: string): GoogleModelVerdict;
-type DiscoveredModelCapability = 'chat' | 'vision' | 'video';
+type DiscoveredModelCapability = 'chat' | 'vision' | 'video' | 'realtime_audio';
 interface OpenAICompatModelListEntry {
     id?: string;
     name?: string;
@@ -103,7 +103,8 @@ export declare function recordGoneStreak(db: ReturnType<typeof getDb>, modelDbId
  * — Google: hit the model-specific generateContent endpoint with a dummy prompt.
  * — Cloudflare: hit the @cf/{model}/ai/run endpoint.
  *
- * A 200 with content = free, 429 = rate_limited (still free), 401/403 = deprecated or invalid key,
+ * A 200 confirms reachability, not pricing; only catalog-confirmed free rows
+ * retain free-tier confirmation. 429 = rate_limited, 401/403 = key error,
  * 404 = deprecated (model removed), transport error = error.
  */
 export declare function checkModelAvailability(modelDbId: number): Promise<AvailabilityCheck>;

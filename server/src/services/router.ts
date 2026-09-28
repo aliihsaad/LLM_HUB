@@ -483,10 +483,22 @@ export function routeCapabilityRequest(
     ORDER BY mc.priority ASC, m.intelligence_rank ASC
   `).all(capability, requestedModel ?? null, requestedModel ?? null, ...(platformFilter ? [platformFilter] : [])) as FallbackRow[];
 
+  const diagnostics = {
+    candidateModels: capabilityRows.length,
+    blockedModels: 0,
+    noEligibleKeys: 0,
+    skippedKeys: 0,
+    cooldown: 0,
+    localRequestLimit: 0,
+    localTokenLimit: 0,
+  };
+
   for (const entry of capabilityRows) {
     if (!entry.enabled) continue;
-    if (skipModelDbIds?.has(entry.model_db_id)) continue;
-    if (isModelRuntimeBlocked(db, entry.model_db_id)) continue;
+    if (skipModelDbIds?.has(entry.model_db_id) || isModelRuntimeBlocked(db, entry.model_db_id)) {
+      diagnostics.blockedModels++;
+      continue;
+    }
 
     const model = db.prepare('SELECT * FROM models WHERE id = ? AND enabled = 1').get(entry.model_db_id) as ModelRow | undefined;
     if (!model) continue;
@@ -499,7 +511,10 @@ export function routeCapabilityRequest(
       'SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status != ?'
     ).all(model.platform, 'invalid') as KeyRow[];
 
-    if (keys.length === 0) continue;
+    if (keys.length === 0) {
+      diagnostics.noEligibleKeys++;
+      continue;
+    }
 
     const limits = {
       rpm: model.rpm_limit,
@@ -516,12 +531,12 @@ export function routeCapabilityRequest(
       idx++;
 
       const skipId = `${model.platform}:${model.model_id}:${key.id}`;
-      if (skipKeys?.has(skipId)) continue;
+      if (skipKeys?.has(skipId)) { diagnostics.skippedKeys++; continue; }
 
-      if (isOnCooldown(model.platform, model.model_id, key.id)) continue;
+      if (isOnCooldown(model.platform, model.model_id, key.id)) { diagnostics.cooldown++; continue; }
 
-      if (!canMakeRequest(model.platform, model.model_id, key.id, limits)) continue;
-      if (!canUseTokens(model.platform, model.model_id, key.id, estimatedTokens, limits)) continue;
+      if (!canMakeRequest(model.platform, model.model_id, key.id, limits)) { diagnostics.localRequestLimit++; continue; }
+      if (!canUseTokens(model.platform, model.model_id, key.id, estimatedTokens, limits)) { diagnostics.localTokenLimit++; continue; }
 
       roundRobinIndex.set(rrKey, idx);
       const decryptedKey = decrypt(key.encrypted_key, key.iv, key.auth_tag);
@@ -541,7 +556,19 @@ export function routeCapabilityRequest(
   }
 
   const target = requestedModel ? ` for model '${requestedModel}'` : '';
-  const err = new Error(`All ${capability} models exhausted${target}. Add more API keys or wait for rate limits to reset.`) as any;
-  err.status = 429;
+  // Preserve other capability endpoints' response contract in this Live fix.
+  if (capability !== 'realtime_audio') {
+    const err = new Error(`All ${capability} models exhausted${target}. Add more API keys or wait for rate limits to reset.`) as any;
+    err.status = 429;
+    throw err;
+  }
+  const locallyLimited = diagnostics.localRequestLimit + diagnostics.localTokenLimit > 0;
+  const reason = locallyLimited
+    ? 'Hub local request/token limits block the eligible keys; this does not establish upstream quota exhaustion.'
+    : 'No eligible route: check enabled credentials, cooldowns, model health, and capability configuration.';
+  const err = new Error(`No ${capability} route available${target}. ${reason}`) as any;
+  err.status = locallyLimited ? 429 : 503;
+  err.code = locallyLimited ? 'local_routing_limited' : 'no_eligible_route';
+  err.diagnostics = diagnostics;
   throw err;
 }

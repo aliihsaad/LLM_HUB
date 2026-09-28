@@ -876,7 +876,16 @@ export class GoogleProvider extends BaseProvider {
         // Transport errors propagate — health.ts marks status='error' without
         // counting toward auto-disable. Only confirmed 401/403 disables a key.
         const res = await this.fetchWithTimeout(`${API_BASE}/models?key=${apiKey}`, { method: 'GET' }, 10000);
-        return res.status !== 401 && res.status !== 403;
+        if (res.ok)
+            return true;
+        if (res.status === 401 || res.status === 403)
+            return false;
+        const error = await res.json().catch(() => ({}));
+        const message = readProviderErrorText(error, res.statusText);
+        // Google uses 400 (not 401) for malformed, revoked, or expired API keys.
+        if (res.status === 400 && /api key not valid|api_key_invalid|api key expired/i.test(JSON.stringify(error)))
+            return false;
+        throw new Error(`Google key validation error ${res.status}: ${message}`);
     }
 }
 //# sourceMappingURL=google.js.map

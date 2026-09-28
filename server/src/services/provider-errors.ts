@@ -18,6 +18,11 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   const msg = err instanceof Error
     ? err.message.toLowerCase()
     : String((err as { message?: unknown })?.message ?? err ?? '').toLowerCase();
+  // Read actual status metadata or our adapters' leading status prefix. Digits
+  // inside retry delays, request IDs, or response bodies are not HTTP statuses.
+  const metadata = err as { status?: unknown; statusCode?: unknown; response?: { status?: unknown } } | null;
+  const status = Number(metadata?.status ?? metadata?.statusCode ?? metadata?.response?.status
+    ?? msg.match(/^(?:(?:[\w.-]+ )*api error\s+|http(?: error)?[:\s]+|status(?: code)?[:\s]+)?([45]\d{2})(?=[:\s]|$)/)?.[1]);
   const isZeroQuotaLimit = /(?:quota|rate|request|token|capacity|free[_ -]?tier|limit).{0,200}\blimit\s*[:=]\s*0\b/s.test(msg)
     || /\blimit\s*[:=]\s*0\b.{0,200}(?:quota|rate|request|token|capacity|free[_ -]?tier)/s.test(msg);
 
@@ -36,7 +41,7 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   // access this resource." Matched before the rate-limit branch because some
   // 402 bodies also say "quota".
   if (
-    /\b402\b/.test(msg)
+    status === 402
     || msg.includes('payment required')
     || msg.includes('organization has been restricted')
     || msg.includes('organization is restricted')
@@ -55,17 +60,20 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   }
 
   if (
-    msg.includes('401')
+    status === 401
     || msg.includes('unauthorized')
     || msg.includes('invalid api key')
     || msg.includes('invalid_api_key')
+    || msg.includes('api key not valid')
+    || msg.includes('api_key_invalid')
+    || msg.includes('api key expired')
   ) {
     return { category: 'auth', retryable: false, skipModel: false, keyCooldownMs: 0 };
   }
 
   if (
-    msg.includes('404')
-    || msg.includes('410')
+    status === 404
+    || status === 410
     || msg.includes('not found')
     || msg.includes('model does not exist')
     || msg.includes('unavailable_model')
@@ -75,7 +83,7 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   }
 
   if (
-    msg.includes('403')
+    status === 403
     || msg.includes('forbidden')
     || msg.includes('subscription')
     || msg.includes('requires a paid')
@@ -87,7 +95,7 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   }
 
   if (
-    msg.includes('429')
+    status === 429
     || msg.includes('rate limit')
     || msg.includes('too many requests')
     || msg.includes('quota')
@@ -107,9 +115,9 @@ export function classifyProviderError(err: unknown): ClassifiedProviderError {
   }
 
   if (
-    msg.includes('503')
+    status === 503
     || msg.includes('unavailable')
-    || msg.includes('500')
+    || status === 500
     || msg.includes('internal server error')
   ) {
     return { category: 'provider', retryable: true, skipModel: true, keyCooldownMs: 60_000 };
