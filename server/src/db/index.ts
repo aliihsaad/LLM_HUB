@@ -128,6 +128,16 @@ function createTables(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS speech_quota (
+      key_id INTEGER NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+      model_id TEXT NOT NULL,
+      retry_at INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      request_limit INTEGER,
+      period TEXT,
+      PRIMARY KEY (key_id, model_id)
+    );
+
     CREATE TABLE IF NOT EXISTS fallback_config (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       model_db_id INTEGER NOT NULL REFERENCES models(id),

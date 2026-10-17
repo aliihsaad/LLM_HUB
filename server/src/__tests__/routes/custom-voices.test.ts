@@ -99,7 +99,42 @@ describe('Gemini 3.8 speech and custom voices', () => {
   it('does not use another project after a custom-voice error', async () => {
     register(); upstream.mockResolvedValue(new Response('{}', { status: 429 }));
     const res = await call('/v1/audio/speech', { model: MODEL, voice: voiceId, input: 'Hello' });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(429);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+  it.each([false, true])('preserves the daily quota, blocks repeat calls, and expires the block (stream=%s)', async stream => {
+    register();
+    upstream.mockResolvedValueOnce(Response.json({ error: {
+      code: 'too_many_requests',
+      message: 'Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per day on Free Tier). Please retry in 22h15m45s. private-transcript https://secret.example/?key=private-key',
+    } }, { status: 429, headers: { 'Retry-After': '80145' } }));
+    const request = { model: MODEL, voice: voiceId, input: 'Hello', stream, response_format: 'pcm' };
+    const res = await call('/v1/audio/speech', request);
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThanOrEqual(80144);
+    const body = await res.json() as any;
+    expect(body.error).toMatchObject({ code: 'daily_quota_exceeded', limit: { requests: 10, period: 'day' } });
+    expect(JSON.stringify(body)).not.toMatch(/private-|secret\.example/);
+    expect((await call('/v1/audio/speech', request)).status).toBe(429);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(getDb().prepare('SELECT kind,request_limit FROM speech_quota WHERE key_id=?').get(owner))
+      .toEqual({ kind: 'daily_quota_exceeded', request_limit: 10 });
+    const persisted = getDb().prepare('SELECT retry_at FROM speech_quota WHERE key_id=?').get(owner) as any;
+    vi.spyOn(Date, 'now').mockReturnValue(persisted.retry_at + 1);
+    upstream.mockResolvedValueOnce(Response.json({ output_audio: { mime_type: 'audio/wav', data: wav.toString('base64') } }));
+    const afterReset = await call('/v1/audio/speech', { model: MODEL, voice: voiceId, input: 'Hello' });
+    expect(afterReset.status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+  it('retains quota details from an SSE error before audio starts', async () => {
+    register();
+    upstream.mockResolvedValueOnce(new Response('data: ' + JSON.stringify({ event_type: 'error', error: {
+      code: 'quota_exceeded', message: 'limit: 10 requests per day. Please retry in 2h3m4s.',
+    } }) + '\n\n'));
+    const res = await call('/v1/audio/speech', { model: MODEL, voice: voiceId, input: 'Hello', stream: true, response_format: 'pcm' });
+    expect(res.status).toBe(429);
+    expect((await res.json() as any).error.code).toBe('daily_quota_exceeded');
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThanOrEqual(7383);
     expect(upstream).toHaveBeenCalledTimes(1);
   });
   it('does not use another key when the owner was disabled', async () => {

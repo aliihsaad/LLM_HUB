@@ -3,6 +3,8 @@ import { once } from 'node:events';
 import { GEMINI_TTS_MODEL, isGemini38Tts, streamSpeech38 } from '../providers/google-speech.js';
 import { toGeminiVoiceName } from '../providers/google.js';
 import { findSpeechVoice } from '../services/speech-voices.js';
+import { GoogleSpeechError, speechQuotaMessage } from '../providers/google-speech-error.js';
+import { getSpeechQuota, recordSpeechQuota } from '../services/speech-quota.js';
 import express, { Router } from 'express';
 import { z } from 'zod';
 import { routeCapabilityRequest, routeRequest, recordModelFailure, recordRateLimitHit, recordSuccess, } from '../services/router.js';
@@ -1652,6 +1654,15 @@ proxyRouter.post('/realtime/sessions', async (req, res) => {
     }
     sendRealtimeFailure(res, lastError);
 });
+function sendSpeechQuota(res, quota) {
+    const retrySeconds = Math.max(1, Math.ceil((quota.retryAt - Date.now()) / 1000));
+    res.setHeader('Retry-After', String(retrySeconds));
+    res.status(429).json({ error: {
+            message: speechQuotaMessage(quota), type: 'rate_limit_error', code: quota.kind,
+            provider: 'google', retry_at: new Date(quota.retryAt).toISOString(), retry_after_seconds: retrySeconds,
+            ...(quota.requestLimit !== undefined ? { limit: { requests: quota.requestLimit, period: quota.period } } : {}),
+        } });
+}
 proxyRouter.post('/audio/speech', async (req, res) => {
     const start = Date.now();
     if (!authenticateProxyRequest(req, res))
@@ -1719,6 +1730,13 @@ proxyRouter.post('/audio/speech', async (req, res) => {
             return;
         }
     }
+    if (requiredKeyId !== undefined && requestedModel) {
+        const quota = getSpeechQuota(requiredKeyId, requestedModel);
+        if (quota) {
+            sendSpeechQuota(res, quota);
+            return;
+        }
+    }
     const controller = new AbortController();
     res.once('close', () => { if (!res.writableFinished)
         controller.abort(); });
@@ -1780,6 +1798,9 @@ proxyRouter.post('/audio/speech', async (req, res) => {
         catch (err) {
             if (controller.signal.aborted)
                 return;
+            if (err instanceof GoogleSpeechError && err.quota) {
+                recordSpeechQuota(route.keyId, route.modelId, err.quota);
+            }
             // Once bytes have been sent, retrying could repeat words or change voice.
             if (res.headersSent) {
                 logRequest(route.platform, route.modelId, 'error', estimatedTokens, 0, Date.now() - start, 'Speech stream interrupted');
@@ -1789,6 +1810,11 @@ proxyRouter.post('/audio/speech', async (req, res) => {
             const latency = Date.now() - start;
             logRequest(route.platform, route.modelId, 'error', estimatedTokens, 0, latency, err.message);
             const failure = classifyProviderError(err);
+            if (err instanceof GoogleSpeechError && err.quota && custom) {
+                recordTerminalProviderFailure(route, failure, err);
+                sendSpeechQuota(res, err.quota);
+                return;
+            }
             if (!custom && canRetryProviderFailure(failure, requestedModel)) {
                 prepareProviderRetry(route, failure, err, skipKeys, skipModels);
                 lastError = err;

@@ -55,6 +55,16 @@ from recorded voice samples are not exposed by this integration.
 
 This is a separate speech capability; reasoning/chat and realtime routing keep
 their existing models. Google account access and quotas still apply.
+For a saved custom voice, an upstream quota error returns HTTP 429 with
+`Retry-After`, `error.code` (`daily_quota_exceeded` or `rate_limit_exceeded`),
+`retry_at`, `retry_after_seconds`, and the request limit when Google supplies it.
+Only these quota facts are retained; raw provider error bodies are not logged.
+Observed cooldowns are stored in SQLite and survive restarts. Requests for that
+voice are held off until the provider's retry time, without rotating its owner
+or imposing the same allowance on every project. A quota reset or billing-tier
+change in the owning Google project is required to increase the real allowance;
+the Hub cannot raise it. After a confirmed tier change, clear the matching
+`speech_quota` row to permit a fresh provider check before the old retry time.
 See Google's [speech documentation](https://ai.google.dev/gemini-api/docs/speech-generation)
 and [voice design guide](https://ai.google.dev/gemini-api/docs/voice-design).
 

@@ -1,4 +1,5 @@
 import type { SpeechRequest, SpeechResult } from 'llmhub-shared/types.js';
+import { readGoogleSpeechError, speechErrorFromPayload } from './google-speech-error.js';
 
 export const GEMINI_TTS_MODEL = 'gemini-3.8-flash-tts';
 const API = 'https://generativelanguage.googleapis.com/v1beta';
@@ -14,8 +15,7 @@ export async function googleVoiceRequest(
     signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]),
   });
   if (!response.ok) {
-    // Never copy a provider URL, credential, or biometric payload into logs.
-    throw Object.assign(new Error(`Google voice request failed (HTTP ${response.status}).`), { status: response.status });
+    throw await readGoogleSpeechError(response);
   }
   return response.json();
 }
@@ -62,7 +62,7 @@ export async function* streamSpeech38(apiKey: string, request: SpeechRequest, vo
     body: JSON.stringify(speech38Body(request, voice, true)),
     signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
   });
-  if (!response.ok) throw Object.assign(new Error(`Google speech stream failed (HTTP ${response.status}).`), { status: response.status });
+  if (!response.ok) throw await readGoogleSpeechError(response);
   if (!response.body) throw new Error('Google returned no speech stream.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -72,7 +72,9 @@ export async function* streamSpeech38(apiKey: string, request: SpeechRequest, vo
     if (!data || data === '[DONE]') return;
     const event = JSON.parse(data);
     const type = event.event_type ?? event.type ?? record.split(/\r?\n/).find(line => line.startsWith('event:'))?.slice(6).trim();
-    if (event.error || ['error', 'interaction.failed', 'interaction.cancelled', 'interaction.requires_action'].includes(type)) throw new Error('Google speech stream failed.');
+    if (event.error || ['error', 'interaction.failed', 'interaction.cancelled', 'interaction.requires_action'].includes(type)) {
+      throw speechErrorFromPayload(502, event, response.headers.get('retry-after'));
+    }
     if (type === 'interaction.completed') {
       if (event.interaction?.status && event.interaction.status !== 'completed') throw new Error('Google speech stream did not complete.');
       completed = true;

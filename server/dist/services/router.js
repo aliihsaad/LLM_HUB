@@ -3,6 +3,7 @@ import { getProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { canMakeRequest, canUseTokens, isOnCooldown } from './ratelimit.js';
 import { isFreeOnlyMode } from '../lib/app-settings.js';
+import { getSpeechQuota } from './speech-quota.js';
 // Round-robin index per platform
 const roundRobinIndex = new Map();
 // ── Dynamic priority: track 429s per model and demote accordingly ──
@@ -386,6 +387,10 @@ export function routeCapabilityRequest(capability, estimatedTokens = 1000, skipK
             idx++;
             if (requiredKeyId !== undefined && key.id !== requiredKeyId)
                 continue;
+            if (capability === 'speech' && getSpeechQuota(key.id, model.model_id)) {
+                diagnostics.cooldown++;
+                continue;
+            }
             const skipId = `${model.platform}:${model.model_id}:${key.id}`;
             if (skipKeys?.has(skipId)) {
                 diagnostics.skippedKeys++;

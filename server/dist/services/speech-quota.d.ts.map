@@ -1,0 +1,1 @@
+{"version":3,"file":"speech-quota.d.ts","sourceRoot":"","sources":["../../src/services/speech-quota.ts"],"names":[],"mappings":"AACA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,qCAAqC,CAAC;AAEvE,iGAAiG;AACjG,wBAAgB,iBAAiB,CAAC,KAAK,EAAE,MAAM,EAAE,KAAK,EAAE,MAAM,EAAE,KAAK,EAAE,WAAW,GAAG,IAAI,CAOxF;AAED,wBAAgB,cAAc,CAAC,KAAK,EAAE,MAAM,EAAE,KAAK,EAAE,MAAM,GAAG,WAAW,GAAG,SAAS,CAKpF"}
