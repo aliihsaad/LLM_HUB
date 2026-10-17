@@ -114,6 +114,15 @@ async function discoverGoogleModels(apiKey, knownSet) {
             const modelId = entry.name?.replace(/^models\//, '');
             if (!modelId || seenModels.has(modelId))
                 continue;
+            // TTS is not a chat model even though it advertises generateContent.
+            if (modelId.includes('-tts')) {
+                const supported = modelId === 'gemini-3.8-flash-tts';
+                discoveries.push({ platform: 'google', modelId,
+                    displayName: entry.displayName ?? modelId, enabledByDefault: supported,
+                    isFree: supported, capabilities: ['audio', 'speech'] });
+                seenModels.add(modelId);
+                continue;
+            }
             const realtime = entry.supportedGenerationMethods?.includes('bidiGenerateContent') === true;
             if (!realtime && !entry.supportedGenerationMethods?.includes('generateContent'))
                 continue;
@@ -570,7 +579,7 @@ export async function discoverAndPersistNewModels() {
             }
             const modelDbId = Number(result.lastInsertRowid);
             updateCategory.run(categorize.category, categorize.specializations.join(','), modelDbId);
-            insertFallback.run(modelDbId, nextPriority++, candidate.capabilities?.includes('realtime_audio') ? 0 : enabled);
+            insertFallback.run(modelDbId, nextPriority++, candidate.capabilities && !candidate.capabilities.includes('chat') ? 0 : enabled);
             insertAvailability.run(modelDbId, discoverySource, candidate.isFree === true ? 1 : 0);
             // New discovered rows are assumed chat-capable by default. Providers
             // that expose modality metadata can add narrower capability routes too.

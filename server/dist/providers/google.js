@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { createSpeech38, isGemini38Tts } from './google-speech.js';
 import { BaseProvider, readProviderErrorText } from './base.js';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const API_BASE_V1ALPHA = 'https://generativelanguage.googleapis.com/v1alpha';
@@ -281,7 +282,7 @@ const OPENAI_TO_GEMINI_VOICE = {
     shimmer: 'Callirrhoe',
     verse: 'Achird',
 };
-function toGeminiVoiceName(voice) {
+export function toGeminiVoiceName(voice) {
     return OPENAI_TO_GEMINI_VOICE[voice.toLowerCase()] ?? voice;
 }
 function toGeminiSpeechPrompt(request) {
@@ -591,7 +592,9 @@ export class GoogleProvider extends BaseProvider {
             _routed_via: { platform: 'google', model: modelId },
         };
     }
-    async createSpeech(apiKey, request, modelId) {
+    async createSpeech(apiKey, request, modelId, signal) {
+        if (isGemini38Tts(modelId))
+            return createSpeech38(apiKey, request, toGeminiVoiceName(request.voice), signal);
         const body = {
             contents: [{ parts: [{ text: toGeminiSpeechPrompt(request) }] }],
             generationConfig: {

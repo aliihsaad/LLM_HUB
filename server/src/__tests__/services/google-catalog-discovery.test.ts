@@ -67,7 +67,7 @@ describe('Google catalog discovery', () => {
       ['gemini-3.1-flash-live-preview', 1, ['realtime_audio']],
       ['gemini-future-audio', 0, ['realtime_audio']],
       ['gemini-3.8-flash-extended-thinking', 0, ['chat']],
-      ['gemini-3.8-flash-tts', 0, ['chat']],
+      ['gemini-3.8-flash-tts', 1, ['audio', 'speech']],
     ] as const) {
       const row = db.prepare(`SELECT id, enabled, is_free, rpm_limit, rpd_limit, tpm_limit FROM models WHERE model_id = ?`).get(modelId) as any;
       expect(row, modelId).toMatchObject({ enabled, is_free: enabled, rpm_limit: null, rpd_limit: null, tpm_limit: null });

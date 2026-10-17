@@ -64,6 +64,7 @@ export async function initDb(dbPath?: string): Promise<Database.Database> {
   restoreRealtimeModelsV23(db);
   flagPaidGoogleModels(db);
   migrateGoogleCatalogV24(db);
+  migrateGoogleSpeechV25(db);
   purgeLegacyBazaarlinkDiscoveries(db);
   ensureUnifiedKey(db);
 
@@ -2106,6 +2107,37 @@ function migrateGoogleCatalogV24(db: Database.Database) {
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(appliedKey, '1');
   });
   apply();
+}
+
+function migrateGoogleSpeechV25(db: Database.Database) {
+  db.exec(`CREATE TABLE IF NOT EXISTS speech_voices (
+    id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    key_id INTEGER REFERENCES api_keys(id) ON DELETE SET NULL,
+    voice_type TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  const flag = 'v25_google_speech_applied';
+  if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(flag)) return;
+  db.transaction(() => {
+    // Standard free tier documented 2026-10-17. No invented per-key quotas.
+    db.prepare(`INSERT INTO models (platform, model_id, display_name, intelligence_rank,
+      speed_rank, size_label, context_window, monthly_token_budget, enabled, is_free)
+      VALUES ('google', 'gemini-3.8-flash-tts', 'Gemini 3.8 Flash TTS', 50, 5, 'Audio', 8192, '', 1, 1)
+      ON CONFLICT(platform, model_id) DO UPDATE SET enabled=1, is_free=1,
+        display_name=excluded.display_name, context_window=excluded.context_window`).run();
+    const { id } = db.prepare("SELECT id FROM models WHERE platform='google' AND model_id='gemini-3.8-flash-tts'").get() as { id: number };
+    db.prepare('UPDATE model_capabilities SET enabled=0 WHERE model_db_id=?').run(id);
+    for (const capability of ['audio', 'speech']) {
+      db.prepare(`INSERT INTO model_capabilities (model_db_id, capability, priority, enabled)
+        VALUES (?, ?, 20, 1) ON CONFLICT(model_db_id, capability) DO UPDATE SET enabled=1`).run(id, capability);
+    }
+    db.prepare(`INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, 50, 0)
+      ON CONFLICT(model_db_id) DO UPDATE SET enabled=0`).run(id);
+    db.prepare(`INSERT INTO model_availability (model_db_id, status, free_tier_confirmed)
+      VALUES (?, 'unknown', 1) ON CONFLICT(model_db_id) DO UPDATE SET free_tier_confirmed=1`).run(id);
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(flag, '1');
+  })();
 }
 
 function ensureUnifiedKey(db: Database.Database) {

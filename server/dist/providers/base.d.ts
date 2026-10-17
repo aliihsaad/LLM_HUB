@@ -17,7 +17,7 @@ export declare abstract class BaseProvider {
     createImage(_apiKey: string, _request: ImageGenerationRequest, _modelId: string): Promise<ImagesResponse>;
     editImage(_apiKey: string, _request: ImageEditRequest, _modelId: string): Promise<ImagesResponse>;
     createImageVariation(_apiKey: string, _request: ImageVariationRequest, _modelId: string): Promise<ImagesResponse>;
-    createSpeech(_apiKey: string, _request: SpeechRequest, _modelId: string): Promise<SpeechResult>;
+    createSpeech(_apiKey: string, _request: SpeechRequest, _modelId: string, _signal?: AbortSignal): Promise<SpeechResult>;
     transcribeAudio(_apiKey: string, _request: AudioTranscriptionRequest, _modelId: string): Promise<AudioTextResult>;
     translateAudio(_apiKey: string, _request: AudioTranslationRequest, _modelId: string): Promise<AudioTextResult>;
     createRealtimeSession(_apiKey: string, _request: RealtimeSessionRequest, _modelId: string): Promise<RealtimeSessionResponse>;

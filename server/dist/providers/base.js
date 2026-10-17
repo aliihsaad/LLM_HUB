@@ -11,7 +11,7 @@ export class BaseProvider {
     async createImageVariation(_apiKey, _request, _modelId) {
         throw new Error(`${this.name} does not support image variations`);
     }
-    async createSpeech(_apiKey, _request, _modelId) {
+    async createSpeech(_apiKey, _request, _modelId, _signal) {
         throw new Error(`${this.name} does not support speech`);
     }
     async transcribeAudio(_apiKey, _request, _modelId) {

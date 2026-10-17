@@ -45,7 +45,7 @@ export type GoogleModelVerdict = {
  * spend until an operator confirms it.
  */
 export declare function classifyGoogleModel(modelId: string, apiDisplayName?: string): GoogleModelVerdict;
-type DiscoveredModelCapability = 'chat' | 'vision' | 'video' | 'realtime_audio';
+type DiscoveredModelCapability = 'chat' | 'vision' | 'video' | 'realtime_audio' | 'audio' | 'speech';
 interface OpenAICompatModelListEntry {
     id?: string;
     name?: string;

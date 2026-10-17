@@ -1,4 +1,8 @@
 import crypto from 'crypto';
+import { once } from 'node:events';
+import { GEMINI_TTS_MODEL, isGemini38Tts, streamSpeech38 } from '../providers/google-speech.js';
+import { toGeminiVoiceName } from '../providers/google.js';
+import { findSpeechVoice } from '../services/speech-voices.js';
 import express, { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
@@ -445,6 +449,7 @@ const speechSchema: z.ZodType<SpeechRequest> = z.object({
   response_format: z.enum(['mp3', 'opus', 'aac', 'flac', 'wav', 'pcm']).optional(),
   speed: z.number().min(0.25).max(4).optional(),
   instructions: z.string().optional(),
+  stream: z.boolean().optional(),
   user: z.string().optional(),
 });
 
@@ -1980,7 +1985,28 @@ proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
     model: parsed.data.model === 'auto' ? undefined : parsed.data.model,
     response_format: parsed.data.response_format ?? 'wav',
   } satisfies SpeechRequest;
+  // A custom voice is bound to the Google project that owns it.
+  let requiredKeyId: number | undefined;
+  const custom = request.voice.startsWith('voice_');
+  if (request.voice.startsWith('voicekey_')) {
+    res.status(400).json({ error: { message: 'Register a stored voice_ ID in Custom voices; stateless voice keys are not supported.' } }); return;
+  }
+  if (custom) {
+    const voice = findSpeechVoice(request.voice);
+    if (!voice?.key_id) { res.status(400).json({ error: { message: 'Register this custom voice in the Hub first.', code: 'voice_not_registered' } }); return; }
+    requiredKeyId = voice.key_id;
+  }
+  if ((custom || request.stream) && !request.model) request.model = GEMINI_TTS_MODEL;
   const requestedModel = request.model;
+  if ((custom || request.stream) && !isGemini38Tts(request.model ?? '')) {
+    res.status(400).json({ error: { message: 'Custom voices and speech streaming require gemini-3.8-flash-tts.' } }); return;
+  }
+  if (isGemini38Tts(request.model ?? '') && request.speed !== undefined && request.speed !== 1) {
+    res.status(400).json({ error: { message: 'For Gemini 3.8 TTS, describe the pace in instructions instead of speed.' } }); return;
+  }
+  if (request.stream && request.response_format !== 'pcm') {
+    res.status(400).json({ error: { message: 'Streaming speech requires response_format: pcm.' } }); return;
+  }
 
   if (request.response_format && !['wav', 'pcm'].includes(request.response_format)) {
     res.status(400).json({
@@ -2002,6 +2028,9 @@ proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
     }
   }
 
+  const controller = new AbortController();
+  res.once('close', () => { if (!res.writableFinished) controller.abort(); });
+  req.once('aborted', () => controller.abort());
   const estimatedTokens = Math.ceil(request.input.length / 4);
   const skipKeys = new Set<string>();
   const skipModels = new Set<number>();
@@ -2016,6 +2045,8 @@ proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
         skipKeys.size > 0 ? skipKeys : undefined,
         requestedModel,
         skipModels.size > 0 ? skipModels : undefined,
+        custom || request.stream ? 'google' : undefined,
+        requiredKeyId,
       );
     } catch (err: any) {
       res.status(err.status ?? 503).json({
@@ -2030,7 +2061,26 @@ proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
     recordRequest(route.platform, route.modelId, route.keyId);
 
     try {
-      const result = await route.provider.createSpeech(route.apiKey, request, route.modelId);
+      if (request.stream) {
+        let bytes = 0;
+        for await (const chunk of streamSpeech38(route.apiKey, request, toGeminiVoiceName(request.voice), controller.signal)) {
+          if (!res.headersSent) {
+            res.setHeader('Content-Type', 'audio/pcm;rate=24000');
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+          }
+          bytes += chunk.byteLength;
+          if (!res.write(chunk)) await once(res, 'drain', { signal: controller.signal });
+        }
+        if (!bytes || bytes % 2) throw new Error('Invalid PCM stream.');
+        recordTokens(route.platform, route.modelId, route.keyId, estimatedTokens);
+        recordSuccess(route.modelDbId);
+        res.end();
+        logRequest(route.platform, route.modelId, 'success', estimatedTokens, 0, Date.now() - start, null);
+        return;
+      }
+      const result = await route.provider.createSpeech(route.apiKey, request, route.modelId, controller.signal);
 
       recordTokens(route.platform, route.modelId, route.keyId, estimatedTokens);
       recordSuccess(route.modelDbId);
@@ -2045,11 +2095,17 @@ proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
       logRequest(route.platform, route.modelId, 'success', estimatedTokens, 0, Date.now() - start, null);
       return;
     } catch (err: any) {
+      if (controller.signal.aborted) return;
+      // Once bytes have been sent, retrying could repeat words or change voice.
+      if (res.headersSent) {
+        logRequest(route.platform, route.modelId, 'error', estimatedTokens, 0, Date.now() - start, 'Speech stream interrupted');
+        res.destroy(); return;
+      }
       const latency = Date.now() - start;
       logRequest(route.platform, route.modelId, 'error', estimatedTokens, 0, latency, err.message);
 
       const failure = classifyProviderError(err);
-      if (canRetryProviderFailure(failure, requestedModel)) {
+      if (!custom && canRetryProviderFailure(failure, requestedModel)) {
         prepareProviderRetry(route, failure, err, skipKeys, skipModels);
         lastError = err;
         console.log(`[Proxy] ${err.message.slice(0, 60)} from ${route.displayName}, falling back (${failure.category}, attempt ${attempt + 1}/${MAX_RETRIES})`);

@@ -12,6 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { PageHeader } from '@/components/page-header'
 import { PlaygroundChatPanel } from '@/components/playground-chat-panel'
 import { RealtimeSessionPanel } from '@/components/realtime-session-panel'
+import { CustomVoices } from '@/components/custom-voices'
 import { cn } from '@/lib/utils'
 import {
   describePlaygroundFallback,
@@ -206,6 +207,7 @@ export default function PlaygroundPage() {
   const [visionFileName, setVisionFileName] = useState('')
   const [voice, setVoice] = useState('alloy')
   const [speechFormat, setSpeechFormat] = useState('wav')
+  const [speechStyle, setSpeechStyle] = useState('')
   const [audioTextFormat, setAudioTextFormat] = useState<(typeof responseFormatOptions)[number]>('json')
   const [language, setLanguage] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -569,6 +571,7 @@ export default function PlaygroundPage() {
       body.input = prompt.trim()
       body.voice = voice.trim() || 'alloy'
       body.response_format = speechFormat
+      if (speechStyle.trim()) body.instructions = speechStyle.trim()
     } else if (mode === 'realtime') {
       body.instructions = prompt.trim() || defaultPrompt.realtime
       body.voice = voice.trim() || 'alloy'
@@ -993,6 +996,13 @@ function fileToDataUrl(file: File): Promise<string> {
                 )}
               </div>
             )}
+
+            {mode === 'speech' && <>
+              <label className="block space-y-1.5 text-xs">Delivery style (optional)
+                <Input value={speechStyle} onChange={e => setSpeechStyle(e.target.value)} placeholder="Warm and conversational" />
+              </label>
+              <CustomVoices onSelect={id => { setVoice(id); setModelOverride('gemini-3.8-flash-tts'); setSpeechFormat('wav') }} />
+            </>}
 
             {(mode === 'transcription' || mode === 'translation') && (
               <>

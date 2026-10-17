@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { createSpeech38, isGemini38Tts } from './google-speech.js';
 import type {
   ChatMessage,
   ChatCompletionResponse,
@@ -379,7 +380,7 @@ const OPENAI_TO_GEMINI_VOICE: Record<string, string> = {
   verse: 'Achird',
 };
 
-function toGeminiVoiceName(voice: string): string {
+export function toGeminiVoiceName(voice: string): string {
   return OPENAI_TO_GEMINI_VOICE[voice.toLowerCase()] ?? voice;
 }
 
@@ -780,7 +781,9 @@ export class GoogleProvider extends BaseProvider {
     apiKey: string,
     request: SpeechRequest,
     modelId: string,
+    signal?: AbortSignal,
   ): Promise<SpeechResult> {
+    if (isGemini38Tts(modelId)) return createSpeech38(apiKey, request, toGeminiVoiceName(request.voice), signal);
     const body: Record<string, unknown> = {
       contents: [{ parts: [{ text: toGeminiSpeechPrompt(request) }] }],
       generationConfig: {

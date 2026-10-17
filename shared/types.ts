@@ -373,6 +373,8 @@ export interface SpeechRequest {
   response_format?: SpeechResponseFormat;
   speed?: number;
   instructions?: string;
+  /** Incremental PCM audio; currently supported by Gemini 3.8 TTS. */
+  stream?: boolean;
   user?: string;
 }
 

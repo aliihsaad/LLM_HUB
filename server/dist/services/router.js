@@ -329,7 +329,7 @@ pinnedModelDbId) {
  * Capability routes are intentionally independent from the chat fallback
  * chain so endpoint-specific models cannot accidentally serve chat traffic.
  */
-export function routeCapabilityRequest(capability, estimatedTokens = 1000, skipKeys, requestedModel, skipModelDbIds, platformFilter) {
+export function routeCapabilityRequest(capability, estimatedTokens = 1000, skipKeys, requestedModel, skipModelDbIds, platformFilter, requiredKeyId) {
     const db = getDb();
     const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
     const capabilityRows = db.prepare(`
@@ -384,6 +384,8 @@ export function routeCapabilityRequest(capability, estimatedTokens = 1000, skipK
         for (let attempt = 0; attempt < keys.length; attempt++) {
             const key = keys[idx % keys.length];
             idx++;
+            if (requiredKeyId !== undefined && key.id !== requiredKeyId)
+                continue;
             const skipId = `${model.platform}:${model.model_id}:${key.id}`;
             if (skipKeys?.has(skipId)) {
                 diagnostics.skippedKeys++;

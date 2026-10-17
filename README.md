@@ -19,6 +19,45 @@ https://github.com/tashfeenahmed/freellmapi
 - Playground coverage for chat, vision, video, embeddings, images, audio, and realtime sessions
 - Optional dashboard PIN lock for management routes and UI
 
+## Gemini 3.8 TTS and custom voices
+
+In **Playground → Test Lab → Speech → Custom voices**, select a saved Google
+key, name and describe a voice, then select **Design voice**. You can also import
+an existing Google `voice_...` ID. The Hub validates and saves the voice with its
+owning credential, so key rotation cannot silently switch to another project.
+Use **Preview** to hear the voice, or **Use voice** followed by **Test Speech**.
+
+The speech API accepts a registered custom voice or a built-in voice such as `Kore`:
+
+```json
+{
+  "model": "gemini-3.8-flash-tts",
+  "input": "Hello. How can I help?",
+  "voice": "voice_YOUR_SAVED_ID",
+  "instructions": "Warm, calm and conversational",
+  "response_format": "wav"
+}
+```
+
+Send this to `POST /v1/audio/speech` with your usual Hub authorization.
+`input` is the spoken transcript; `instructions` controls delivery separately.
+Use `instructions` for pace rather than a numeric `speed` other than `1`.
+For streamed raw audio, set `"stream": true` and `"response_format": "pcm"`.
+PCM output is signed 16-bit little-endian, mono, 24 kHz. A client disconnect
+cancels generation; an incomplete upstream stream fails instead of replaying
+audio through a fallback route. WAV remains the default non-streaming output.
+
+Dashboard-authenticated management endpoints: `GET /api/voices`,
+`POST /api/voices/design` (`key_id`, `display_name`, `prompt`),
+`POST /api/voices/import` (`key_id`, `voice_id`, optional `display_name`),
+and `GET /api/voices/:id/preview`. Stateless `voicekey_...` values and creation
+from recorded voice samples are not exposed by this integration.
+
+This is a separate speech capability; reasoning/chat and realtime routing keep
+their existing models. Google account access and quotas still apply.
+See Google's [speech documentation](https://ai.google.dev/gemini-api/docs/speech-generation)
+and [voice design guide](https://ai.google.dev/gemini-api/docs/voice-design).
+
 ## Project layout
 
 This repo is a workspace with these packages:

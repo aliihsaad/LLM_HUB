@@ -86,6 +86,7 @@ export abstract class BaseProvider {
     _apiKey: string,
     _request: SpeechRequest,
     _modelId: string,
+    _signal?: AbortSignal,
   ): Promise<SpeechResult> {
     throw new Error(`${this.name} does not support speech`);
   }

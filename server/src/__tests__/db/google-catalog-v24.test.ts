@@ -57,7 +57,7 @@ describe('V24 Google catalog migration', () => {
   it('repairs prior disabled discovery once, preserving custom quotas and later operator choices', async () => {
     const db = getDb();
     db.prepare(`DELETE FROM settings WHERE key = 'v24_google_catalog_applied'`).run();
-    for (const id of [flash, live, 'gemini-3.8-flash-extended-thinking', 'gemini-3.8-flash-tts']) {
+    for (const id of [flash, live, 'gemini-3.8-flash-extended-thinking', 'gemini-future-flash-tts']) {
       db.prepare(`INSERT INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, enabled, is_free)
         VALUES ('google', ?, ?, 999, 999, 0, 0) ON CONFLICT(platform, model_id) DO UPDATE SET enabled = 0, is_free = 0, intelligence_rank = 999, speed_rank = 999`).run(id, id);
       for (const capability of ['chat', 'vision', 'video']) db.prepare(`INSERT INTO model_capabilities (model_db_id, capability, enabled) VALUES (?, ?, 0)
@@ -71,7 +71,7 @@ describe('V24 Google catalog migration', () => {
     expect(caps(live)).toEqual(['realtime_audio']);
     expect(model(fallback)).toMatchObject({ enabled: 1, rpm_limit: 7, rpd_limit: null, tpm_limit: 123456, tpd_limit: 98765 });
     expect(model(native)).toMatchObject({ rpm_limit: null, rpd_limit: null, tpm_limit: null });
-    for (const id of ['gemini-3.8-flash-extended-thinking', 'gemini-3.8-flash-tts']) expect(model(id)).toMatchObject({ enabled: 0, is_free: 0 });
+    for (const id of ['gemini-3.8-flash-extended-thinking', 'gemini-future-flash-tts']) expect(model(id)).toMatchObject({ enabled: 0, is_free: 0 });
     for (const id of [flash, live, fallback]) {
       getDb().prepare('UPDATE models SET enabled = 0, rpm_limit = 31 WHERE id = ?').run(model(id).id);
       getDb().prepare('UPDATE model_capabilities SET enabled = 0, priority = 77 WHERE model_db_id = ?').run(model(id).id);

@@ -68,5 +68,5 @@ pinnedModelDbId?: number): RouteResult;
  * Capability routes are intentionally independent from the chat fallback
  * chain so endpoint-specific models cannot accidentally serve chat traffic.
  */
-export declare function routeCapabilityRequest(capability: ModelCapability, estimatedTokens?: number, skipKeys?: Set<string>, requestedModel?: string, skipModelDbIds?: Set<number>, platformFilter?: string): RouteResult;
+export declare function routeCapabilityRequest(capability: ModelCapability, estimatedTokens?: number, skipKeys?: Set<string>, requestedModel?: string, skipModelDbIds?: Set<number>, platformFilter?: string, requiredKeyId?: number): RouteResult;
 //# sourceMappingURL=router.d.ts.map

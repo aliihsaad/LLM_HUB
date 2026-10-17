@@ -18,6 +18,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import modelScoutRouter from './routes/model-scout.js';
 import modelCategoriesRouter from './routes/model-categories.js';
 import knowledgeRouter from './routes/knowledge.js';
+import { voicesRouter } from './routes/voices.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JSON_BODY_LIMIT = '25mb';
 export function createApp() {
@@ -42,6 +43,7 @@ export function createApp() {
     app.use('/api', adminAuthMiddleware);
     // API routes
     app.use('/api/keys', keysRouter);
+    app.use('/api/voices', voicesRouter);
     app.use('/api/models', modelsRouter);
     app.use('/api/fallback', fallbackRouter);
     app.use('/api/analytics', analyticsRouter);

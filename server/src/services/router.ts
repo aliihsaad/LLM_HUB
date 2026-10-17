@@ -466,6 +466,7 @@ export function routeCapabilityRequest(
   requestedModel?: string,
   skipModelDbIds?: Set<number>,
   platformFilter?: string,
+  requiredKeyId?: number,
 ): RouteResult {
   const db = getDb();
   const freeOnlyFragment = isFreeOnlyMode(db) ? 'AND m.is_free = 1' : '';
@@ -529,6 +530,8 @@ export function routeCapabilityRequest(
     for (let attempt = 0; attempt < keys.length; attempt++) {
       const key = keys[idx % keys.length];
       idx++;
+
+      if (requiredKeyId !== undefined && key.id !== requiredKeyId) continue;
 
       const skipId = `${model.platform}:${model.model_id}:${key.id}`;
       if (skipKeys?.has(skipId)) { diagnostics.skippedKeys++; continue; }
